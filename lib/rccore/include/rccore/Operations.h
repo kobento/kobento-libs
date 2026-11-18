@@ -160,6 +160,7 @@ public:
     static constexpr int MODIFIER_OFFSET = 221;
     static constexpr int VALUE_FLOAT_CHANGE = 222;
     static constexpr int MODIFIER_ZINDEX = 223;
+    static constexpr int MODIFIER_TEXT_INPUT = 60;
     static constexpr int MODIFIER_GRAPHICS_LAYER = 224;
     static constexpr int MODIFIER_TOUCH_CANCEL = 225;
     static constexpr int MODIFIER_SCROLL = 226;

@@ -789,6 +789,29 @@ public:
     }
 };
 
+// MODIFIER_TEXT_INPUT (60, androidx CL 4451608): the string a component shows is editable.
+// Read and kept inert: this engine has no text input, so the component shows its text, as the
+// reference does on a player without TextInputSupport.
+class ModifierTextInput : public Operation {
+public:
+    int textId = 0, keyboardType = 0, imeAction = 0, flags = 0, maxLength = 0, filter = 0, hintId = 0;
+    std::string name() const override { return "MODIFIER_TEXT_INPUT"; }
+    int opcode() const override { return 60; }
+    std::vector<Field> fields() const override {
+        return {{"textId", "INT", std::to_string(textId)}, {"keyboardType", "INT", std::to_string(keyboardType)},
+                {"imeAction", "INT", std::to_string(imeAction)}, {"flags", "INT", std::to_string(flags)},
+                {"maxLength", "INT", std::to_string(maxLength)}, {"filter", "INT", std::to_string(filter)},
+                {"hintId", "INT", std::to_string(hintId)}};
+    }
+    void apply(RemoteContext&) override {}
+    static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
+        auto op = std::make_unique<ModifierTextInput>();
+        op->textId = buf.readInt(); op->keyboardType = buf.readInt(); op->imeAction = buf.readInt();
+        op->flags = buf.readInt(); op->maxLength = buf.readInt(); op->filter = buf.readInt(); op->hintId = buf.readInt();
+        ops.push_back(std::move(op));
+    }
+};
+
 class ModifierTouchDown : public Operation {
 public:
     std::string name() const override { return "MODIFIER_TOUCH_DOWN"; }
