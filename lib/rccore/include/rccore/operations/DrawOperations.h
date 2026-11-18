@@ -12,6 +12,10 @@ class TextData : public Operation {
 public:
     int textId = 0;
     std::string text;
+    // The context the text was loaded into: it is loaded once per context (and again when
+    // dirty), as Java applies a data operation at initialization and then only when dirty.
+    // Applied on every frame, it reset a string changed since the load (androidx CL 4445989).
+    const RemoteContext* loadedIn = nullptr;
 
     std::string name() const override { return "DATA_TEXT"; }
     int opcode() const override { return 102; }

@@ -8,7 +8,11 @@ namespace rccore {
 
 // ── TextData ──────────────────────────────────────────────────────────
 void TextData::apply(RemoteContext& context) {
-    // TS: no mode check — runs in ALL modes
+    // No mode check: the first apply (the data pass) loads it, whatever the mode. Later
+    // frames leave the value alone unless the operation is dirty, so a string changed since
+    // the load (by the player, an edit) is not reset (androidx CL 4445989).
+    if (loadedIn == &context && !isDirty()) return;
+    loadedIn = &context;
     context.loadText(textId, text);
 }
 

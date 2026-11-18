@@ -1,0 +1,3 @@
+{"header":{"apiLevel":7,"width":200,"height":200,"profiles":513},
+ "root":[{"variable":{"name":"label","vtype":"string","value":"initial","export":true}},
+  {"column":{"modifiers":["fillMaxSize",{"background":"#FFFFFFFF"}],"children":[{"text":{"value":"@label","fontSize":16,"color":"#FF000000"}}]}}]}

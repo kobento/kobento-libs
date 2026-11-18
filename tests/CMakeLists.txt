@@ -51,3 +51,9 @@ add_executable(text_wrap_test text_wrap_test.cpp)
 target_link_libraries(text_wrap_test PRIVATE rcskia rccore skia_lib)
 add_test(NAME text_wrap
          COMMAND text_wrap_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
+# A string changed after the load is not reset by later frames or a resize (androidx CL 4445989).
+add_executable(root_data_test root_data_test.cpp)
+target_link_libraries(root_data_test PRIVATE rcskia rccore skia_lib)
+add_test(NAME root_data
+         COMMAND root_data_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
