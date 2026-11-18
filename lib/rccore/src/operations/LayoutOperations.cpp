@@ -236,7 +236,8 @@ static bool isModifierOp(const Operation* op) {
            // 243 MODIFIER_DIMENSION_CONSTRAINTS (requiredWidthIn/requiredHeightIn) and
            // 250 ACCESSIBILITY_SEMANTICS are modifiers too. Omitting them here meant
            // the switch below never saw them: 243's constraints were silently dropped.
-           oc == 243 || oc == 250;
+           oc == 243 || oc == 250 ||
+           oc == 60;   // MODIFIER_TEXT_INPUT
 }
 
 static bool isLayoutComponent(const Operation* op) {
@@ -263,6 +264,7 @@ static void inflateLayout(Operation* self, LayoutState& ls) {
     ls.padBeforeWidth = 0;
     ls.padBeforeHeight = 0;
     ls.ripple = nullptr;
+    ls.textInput = nullptr;
     ls.graphicsLayer = nullptr;
     ls.paintMods.clear();
     ls.animSpec = nullptr;
@@ -366,6 +368,9 @@ static void inflateLayout(Operation* self, LayoutState& ls) {
                     }
                     break;
                 }
+                case 60:  // ModifierTextInput: inert here (no editor), but an empty text shows its hint
+                    ls.textInput = child;
+                    break;
                 case 229: // ModifierRipple
                     ls.ripple = child;
                     ls.paintMods.push_back({child});
@@ -3479,6 +3484,18 @@ static void paintLayoutComponent(Operation* op, RemoteContext& ctx, MeasurePass&
         }
 
         std::string text = ctx.getText(tid);
+        // An empty editable text shows its hint instead, at 45% of the text's alpha
+        // (TextInputModifierOperation.paintHint, androidx CL 4451608).
+        if (text.empty() && ls.textInput) {
+            auto* ti = static_cast<ModifierTextInput*>(ls.textInput);
+            if (ti->hintId != 0) {
+                text = ctx.getText(ti->hintId);
+                tid = ti->hintId;
+                const uint32_t c = static_cast<uint32_t>(resolvedColor);
+                const uint32_t a = ((c >> 24) * 45) / 100;
+                resolvedColor = static_cast<int>((a << 24) | (c & 0x00FFFFFFu));
+            }
+        }
         if (!text.empty()) {
             pc->savePaint();
             PaintBundle textPaint;
