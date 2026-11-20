@@ -57,3 +57,20 @@ add_executable(root_data_test root_data_test.cpp)
 target_link_libraries(root_data_test PRIVATE rcskia rccore skia_lib)
 add_test(NAME root_data
          COMMAND root_data_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
+# AddMesh2D FLAG_ANTIALIAS expands as the Java reference (fixture written on the JVM).
+add_executable(mesh2d_antialias_test mesh2d_antialias_test.cpp)
+target_link_libraries(mesh2d_antialias_test PRIVATE rccore)
+add_test(NAME mesh2d_antialias
+         COMMAND mesh2d_antialias_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mesh2d_antialias_java.txt")
+
+# BINARY_DATA reads as the Java reference and is stored under its id (fixture from the JVM).
+add_executable(binary_data_test binary_data_test.cpp)
+target_link_libraries(binary_data_test PRIVATE rccore)
+add_test(NAME binary_data
+         COMMAND binary_data_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/binary_data_java.txt")
+
+# Not a test: prints what this player makes of mesh/blob cases, for the three-way check
+# (Java, C++, TypeScript) in rcJson's tools/xcheck.
+add_executable(mesh2d_dump mesh2d_dump.cpp)
+target_link_libraries(mesh2d_dump PRIVATE rccore)

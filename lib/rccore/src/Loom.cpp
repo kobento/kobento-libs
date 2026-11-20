@@ -7,6 +7,7 @@
 #include "rccore/operations/LayoutOperations.h"
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -84,7 +85,16 @@ bool readOperationTree(WireBuffer& buffer, std::vector<std::unique_ptr<Operation
         std::vector<std::unique_ptr<Operation>> temp;
         idTrace.clear();
         buffer.mIdTrace = maxProviderId ? &idTrace : nullptr;
-        reader(buffer, temp);
+        // A reader that finds its payload invalid throws, as the Java readers do; the
+        // document is then refused, rather than the throw reaching the host uncaught.
+        try {
+            reader(buffer, temp);
+        } catch (const std::runtime_error& e) {
+            buffer.mIdTrace = nullptr;
+            std::fprintf(stderr, "rccore: %s at %d: %s\n", Operations::getName(opcode).c_str(),
+                         opStart, e.what());
+            return false;
+        }
         buffer.mIdTrace = nullptr;
 
         for (auto& op : temp) {

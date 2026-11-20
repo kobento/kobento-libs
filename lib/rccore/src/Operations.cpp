@@ -5,6 +5,7 @@
 #include "rccore/operations/LayoutOperations.h"
 #include "rccore/operations/Operations3D.h"
 #include "rccore/operations/Mesh2D.h"
+#include "rccore/operations/BinaryData.h"
 #include "rccore/operations/StubOperations.h"
 #include <mutex>
 
@@ -124,6 +125,7 @@ void Operations::init() {
     registerReader(ADD_MESH_2D, "ADD_MESH_2D", AddMesh2D::read);
     registerReader(DRAW_MESH_2D, "DRAW_MESH_2D", DrawMesh2D::read);
     registerReader(MATRIX_FROM_MESH_2D, "MATRIX_FROM_MESH_2D", MatrixFromMesh2D::read);
+    registerReader(BINARY_DATA, "BINARY_DATA", BinaryData::read);
     registerReader(DRAW_ARC, "DRAW_ARC", DrawArc::read);
     registerReader(DRAW_PATH, "DRAW_PATH", DrawPath::read);
     registerReader(DRAW_TWEEN_PATH, "DRAW_TWEEN_PATH", DrawTweenPath::read);

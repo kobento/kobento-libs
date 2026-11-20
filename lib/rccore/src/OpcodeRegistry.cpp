@@ -40,6 +40,8 @@ void OpcodeRegistry::init() {
     reg({143, "DATA_BOOLEAN", {{"id", FT::INT}, {"value", FT::BOOLEAN}}});
     reg({101, "DATA_BITMAP", {{"imageId", FT::INT}, {"widthAndType", FT::INT},
         {"heightAndEncoding", FT::INT}, {"bitmap", FT::BUFFER}}});
+    reg({41, "BINARY_DATA", {{"id", FT::INT}, {"type", FT::INT}, {"flags", FT::INT},
+        {"data", FT::BUFFER}}});
     reg({167, "DATA_BITMAP_FONT", {{"id", FT::INT}, {"versionAndNumGlyphs", FT::INT}}, true, false});
     reg({63, "THEME", {{"theme", FT::INT}}});
     reg({64, "CLICK_AREA", {{"id", FT::INT}, {"contentDescriptionId", FT::INT},

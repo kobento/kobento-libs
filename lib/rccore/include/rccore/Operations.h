@@ -22,6 +22,8 @@ public:
     static constexpr int MESH_EXPRESSION_3D = 117;
     static constexpr int SET_TEXTURE_3D = 118;
     static constexpr int MESH_PRIMITIVE_3D = 120;
+    // Embedded documents. BINARY_DATA carries a blob (e.g. a child document's bytes).
+    static constexpr int BINARY_DATA = 41;
     static constexpr int COMPONENT_START = 2;
     static constexpr int ANIMATION_SPEC = 14;
     static constexpr int MODIFIER_WIDTH = 16;

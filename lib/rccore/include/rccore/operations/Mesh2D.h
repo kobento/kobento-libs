@@ -2,7 +2,8 @@
 // 2D vertex meshes — ADD_MESH_2D (104), DRAW_MESH_2D (105), MATRIX_FROM_MESH_2D (106).
 //
 // Ported from androidx remote-core AddMesh2D.java / DrawMesh2D.java / MatrixFromMesh2D.java
-// and operations/utilities/Mesh2DGenerator.java (landed 2026-09). The wire format and the
+// and operations/utilities/Mesh2DGenerator.java (landed 2026-09; FLAG_ANTIALIAS 2026-11). The
+// wire format and the
 // generated geometry are both part of the contract: a document is authored against one
 // player and drawn on another, so the vertices this produces must match the reference for
 // the same input, not merely look similar.
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 #include "rccore/ExpressionEvaluator.h"
@@ -443,9 +445,277 @@ class MonotonicSpline {
     std::vector<float> mX, mY, mM;
 };
 
-// ── the frame of a mesh at (u, v), and the matrix built from it ─────────────────────────
-
 static constexpr float DEGENERATE_EPSILON = 1e-6f;
+
+// ── antialiasing skirt (AddMesh2D FLAG_ANTIALIAS) ───────────────────────────────────────
+//
+// drawVertices does not antialias triangle edges, so a mesh stops at a hard, stepped edge. The
+// skirt is a band of vertices just outside each boundary loop that repeat their neighbour's
+// colour and uv at alpha 0, so the edge fades out over `width` instead. Which vertices, in which
+// order, and which triangles join them are part of the contract: MatrixFromMesh2D and the
+// painter's order of a self-overlapping mesh both depend on them.
+
+/** In AddMesh2D `flags`: grow the skirt. The payload then ends in one more float, its width. */
+static constexpr int FLAG_ANTIALIAS = 1 << 8;
+/** The bits of `flags` holding a TYPE_SPLINE_ROUND_STRIP's cap columns. */
+static constexpr int CAP_SEGMENTS_MASK = 0xFF;
+static constexpr float DEFAULT_ANTIALIAS_WIDTH = 1.0f;
+/** The furthest a skirt vertex is pushed out at a corner, as a multiple of the width: SVG's
+ *  default miter limit. */
+static constexpr float ANTIALIAS_MAX_MITER = 4.0f;
+
+using Loops = std::vector<std::vector<int32_t>>;
+
+/** The boundary loops of a layout, each a closed ring of body vertex indices listed in the
+ *  direction the body's own triangles run along it. A grid-wired layout has one loop around all
+ *  four sides; polar and ring have two (first row, last row); a fan has one, its rim. Empty
+ *  when the counts describe no area. */
+inline Loops antialiasLoops(int layout, int uCount, int vCount) {
+    switch (layout) {
+        case LAYOUT_FAN: {
+            if (uCount < 3) return {};
+            std::vector<int32_t> rim(static_cast<size_t>(uCount));
+            for (int i = 0; i < uCount; i++) rim[i] = 1 + i;
+            return {rim};
+        }
+        case LAYOUT_POLAR:
+        case LAYOUT_RING: {
+            if (uCount < 3 || vCount < 2) return {};
+            // The body's triangles run along the first row backwards and the last forwards.
+            std::vector<int32_t> first(static_cast<size_t>(uCount)), last(static_cast<size_t>(uCount));
+            int lastRow = (vCount - 1) * uCount;
+            for (int i = 0; i < uCount; i++) {
+                first[i] = (uCount - i) % uCount;
+                last[i] = lastRow + i;
+            }
+            return {first, last};
+        }
+        default: {
+            // Anything else is wired as a grid by generateIndices, so it is bounded as one.
+            if (uCount < 2 || vCount < 2) return {};
+            std::vector<int32_t> loop(static_cast<size_t>(2 * (uCount + vCount) - 4));
+            size_t k = 0;
+            // Down the first column, along the last row, up the last column, back along row 0.
+            for (int j = 0; j < vCount; j++) loop[k++] = j * uCount;
+            for (int i = 1; i < uCount; i++) loop[k++] = (vCount - 1) * uCount + i;
+            for (int j = vCount - 2; j >= 0; j--) loop[k++] = j * uCount + uCount - 1;
+            for (int i = uCount - 2; i >= 1; i--) loop[k++] = i;
+            return {loop};
+        }
+    }
+}
+
+/** The vertices a skirt around `loops` adds: one per loop vertex. Two triangles per edge. */
+inline int antialiasVertexCount(const Loops& loops) {
+    int count = 0;
+    for (const auto& loop : loops) count += static_cast<int>(loop.size());
+    return count;
+}
+inline int antialiasIndexCount(const Loops& loops) { return antialiasVertexCount(loops) * 6; }
+
+/** A vertex one step into the body from a boundary vertex; only its side matters. */
+inline int antialiasInward(int layout, int uCount, int vCount, int vertex) {
+    if (layout == LAYOUT_FAN) return 0;
+    int i = vertex % uCount;
+    int j = vertex / uCount;
+    if (layout == LAYOUT_POLAR || layout == LAYOUT_RING) {
+        return (j == 0 ? 1 : vCount - 2) * uCount + i;
+    }
+    int ii = i == 0 ? 1 : (i == uCount - 1 ? uCount - 2 : i);
+    int jj = j == 0 ? 1 : (j == vCount - 1 ? vCount - 2 : j);
+    return jj * uCount + ii;
+}
+
+/** Which side of the loop the body is on, by a vote of every edge (in double, as the
+ *  reference): 1 when outward is (dy, -dx), -1 for the reverse, 0 when it has no area. */
+inline float outwardSide(int layout, int uCount, int vCount, const std::vector<int32_t>& loop,
+                         const float* verts) {
+    double vote = 0, magnitude = 0;
+    size_t n = loop.size();
+    for (size_t e = 0; e < n; e++) {
+        int a = loop[e];
+        int b = loop[(e + 1) % n];
+        int c = antialiasInward(layout, uCount, vCount, a);
+        double ax = verts[a * 2], ay = verts[a * 2 + 1];
+        double dx = verts[b * 2] - ax, dy = verts[b * 2 + 1] - ay;
+        double cx = verts[c * 2] - ax, cy = verts[c * 2 + 1] - ay;
+        vote += dx * cy - dy * cx;
+        magnitude += std::hypot(dx, dy) * std::hypot(cx, cy);
+    }
+    if (!(std::fabs(vote) > 1e-6 * magnitude)) return 0.0f;
+    return vote > 0 ? 1.0f : -1.0f;
+}
+
+/** Each loop edge's unit outward normal, zero for an edge with no length; false if no edge
+ *  has any. */
+inline bool edgeNormals(const std::vector<int32_t>& loop, const float* verts, float side,
+                        float* normals) {
+    size_t n = loop.size();
+    bool any = false;
+    for (size_t e = 0; e < n; e++) {
+        int a = loop[e];
+        int b = loop[(e + 1) % n];
+        float dx = verts[b * 2] - verts[a * 2];
+        float dy = verts[b * 2 + 1] - verts[a * 2 + 1];
+        float length = static_cast<float>(std::hypot(static_cast<double>(dx), static_cast<double>(dy)));
+        if (length > DEGENERATE_EPSILON) {
+            normals[e * 2] = side * dy / length;
+            normals[e * 2 + 1] = -side * dx / length;
+            any = true;
+        } else {
+            normals[e * 2] = 0.0f;
+            normals[e * 2 + 1] = 0.0f;
+        }
+    }
+    return any;
+}
+
+inline bool hasNormal(const float* normals, int edge) {
+    return normals[edge * 2] != 0.0f || normals[edge * 2 + 1] != 0.0f;
+}
+
+/** Place each skirt vertex on the mitred bisector of the nearest edges with length on either
+ *  side. Two passes: the backward one parks the normal of the edge after each vertex in that
+ *  vertex's skirt slot; the forward one combines it with the edge before and overwrites it. */
+inline void skirtPositions(const std::vector<int32_t>& loop, float* verts, float reach,
+                           float side, const float* normals, int base) {
+    int n = static_cast<int>(loop.size());
+    int next = 0;
+    while (!hasNormal(normals, next)) next++;
+    for (int k = n - 1; k >= 0; k--) {
+        if (hasNormal(normals, k)) next = k;
+        verts[(base + k) * 2] = normals[next * 2];
+        verts[(base + k) * 2 + 1] = normals[next * 2 + 1];
+    }
+
+    int previous = n - 1;
+    while (!hasNormal(normals, previous)) previous--;
+    const float limit = ANTIALIAS_MAX_MITER * ANTIALIAS_MAX_MITER;
+    for (int k = 0; k < n; k++) {
+        if (k > 0 && hasNormal(normals, k - 1)) previous = k - 1;
+        float px = normals[previous * 2];
+        float py = normals[previous * 2 + 1];
+        float mx = px + verts[(base + k) * 2];
+        float my = py + verts[(base + k) * 2 + 1];
+        // |m| = 2cos(a/2) for unit normals a radians apart, so the miter 1/cos(a/2) is 2/|m|.
+        float lengthSquared = mx * mx + my * my;
+        float offsetX, offsetY;
+        if (lengthSquared < 1e-12f) {
+            // The loop turns straight back on itself, as at a tip whose last edge was skipped:
+            // carry on past the tip along the edge that arrives there.
+            offsetX = -side * py * reach;
+            offsetY = side * px * reach;
+        } else {
+            float scale = 2.0f / lengthSquared;
+            if (lengthSquared * limit < 4.0f) {
+                scale = ANTIALIAS_MAX_MITER / static_cast<float>(std::sqrt(static_cast<double>(lengthSquared)));
+            }
+            offsetX = mx * scale * reach;
+            offsetY = my * scale * reach;
+        }
+        int a = loop[k];
+        verts[(base + k) * 2] = verts[a * 2] + offsetX;
+        verts[(base + k) * 2 + 1] = verts[a * 2 + 1] + offsetY;
+    }
+}
+
+/** Grow the skirt into the tail of the arrays, after the first `bodyVertexCount` vertices; the
+ *  arrays must already have room for it. A loop or body with no area gets a skirt of zero
+ *  width: it keeps its vertex slots, so the sizes never depend on the geometry, but it draws
+ *  nothing. */
+inline void appendAntialiasSkirt(int layout, int uCount, int vCount, const Loops& loops,
+                                 float width, std::vector<float>& verts, std::vector<float>& uv,
+                                 std::vector<int32_t>& colors, int bodyVertexCount) {
+    // NaN, an unresolved variable, fails the comparison and so collapses the skirt too.
+    float reach = width > 0.0f && width < INFINITY ? width : 0.0f;
+    int base = bodyVertexCount;
+    std::vector<float> normals;
+    for (const auto& loop : loops) {
+        int n = static_cast<int>(loop.size());
+        normals.assign(static_cast<size_t>(2 * n), 0.0f);
+        float side = reach > 0.0f ? outwardSide(layout, uCount, vCount, loop, verts.data()) : 0.0f;
+        if (side != 0.0f && edgeNormals(loop, verts.data(), side, normals.data())) {
+            skirtPositions(loop, verts.data(), reach, side, normals.data(), base);
+        } else {
+            for (int e = 0; e < n; e++) {
+                verts[(base + e) * 2] = verts[loop[e] * 2];
+                verts[(base + e) * 2 + 1] = verts[loop[e] * 2 + 1];
+            }
+        }
+        for (int e = 0; e < n; e++) {
+            int a = loop[e];
+            int skirtA = base + e;
+            if (!uv.empty()) {
+                uv[skirtA * 2] = uv[a * 2];
+                uv[skirtA * 2 + 1] = uv[a * 2 + 1];
+            }
+            if (!colors.empty()) colors[skirtA] = colors[a] & 0x00FFFFFF;
+        }
+        base += n;
+    }
+}
+
+/** The body's triangles in their own order, each followed by the skirt along whichever of its
+ *  edges lie on a loop, so a mesh that overlaps itself keeps its painter's order. A loop edge
+ *  no triangle runs along (only a hand-built list has one) gets its skirt after everything. */
+inline void antialiasIndices(const std::vector<int32_t>& body, const Loops& loops,
+                             int bodyVertexCount, std::vector<int32_t>& out) {
+    int edgeCount = antialiasVertexCount(loops);
+    out.assign(body.size() + static_cast<size_t>(edgeCount) * 6, 0);
+    // Each loop edge a -> b with the skirt vertices beyond them, found from a by way of the
+    // edge that leaves it. No vertex is on a loop twice.
+    std::vector<int32_t> edges(static_cast<size_t>(edgeCount) * 4);
+    std::vector<int32_t> leaving(static_cast<size_t>(std::max(0, bodyVertexCount)), -1);
+    int edge = 0;
+    int base = bodyVertexCount;
+    for (const auto& loop : loops) {
+        int n = static_cast<int>(loop.size());
+        for (int e = 0; e < n; e++) {
+            edges[edge * 4] = loop[e];
+            edges[edge * 4 + 1] = loop[(e + 1) % n];
+            edges[edge * 4 + 2] = base + e;
+            edges[edge * 4 + 3] = base + (e + 1) % n;
+            if (loop[e] >= 0 && loop[e] < bodyVertexCount) leaving[loop[e]] = edge;
+            edge++;
+        }
+        base += n;
+    }
+    auto loopEdge = [&](int a, int b) {
+        if (a >= 0 && a < bodyVertexCount) {
+            int e = leaving[a];
+            if (e >= 0 && edges[e * 4 + 1] == b) return e;
+        }
+        if (b >= 0 && b < bodyVertexCount) {
+            int e = leaving[b];
+            if (e >= 0 && edges[e * 4 + 1] == a) return e;
+        }
+        return -1;
+    };
+    size_t k = 0;
+    auto skirtTriangles = [&](int e) {
+        int a = edges[e * 4], b = edges[e * 4 + 1];
+        int skirtA = edges[e * 4 + 2], skirtB = edges[e * 4 + 3];
+        // The body's triangle runs a -> b, so the skirt's runs b -> a: the same winding.
+        out[k++] = b; out[k++] = a; out[k++] = skirtA;
+        out[k++] = b; out[k++] = skirtA; out[k++] = skirtB;
+    };
+    std::vector<uint8_t> drawn(static_cast<size_t>(edgeCount), 0);
+    size_t whole = body.size() / 3 * 3;
+    for (size_t t = 0; t < whole; t += 3) {
+        out[k++] = body[t];
+        out[k++] = body[t + 1];
+        out[k++] = body[t + 2];
+        for (int sIdx = 0; sIdx < 3; sIdx++) {
+            int e = loopEdge(body[t + sIdx], body[t + (sIdx + 1) % 3]);
+            if (e >= 0 && !drawn[e]) { drawn[e] = 1; skirtTriangles(e); }
+        }
+    }
+    for (int e = 0; e < edgeCount; e++) if (!drawn[e]) skirtTriangles(e);
+    // Indices past the last whole triangle draw nothing, and stay last so they join nothing.
+    for (size_t i = whole; i < body.size(); i++) out[k++] = body[i];
+}
+
+// ── the frame of a mesh at (u, v), and the matrix built from it ─────────────────────────
 
 inline float bilinear(const float* verts, int uCount, int i0, int j0, int i1, int j1,
                       float tu, float tv, int component) {
@@ -463,7 +733,9 @@ inline void sampleMeshPosition(int layout, int uCount, int vCount, const float* 
                                int vertexCount, float u, float v, float* out) {
     if (vertexCount == 0) { out[0] = out[1] = 0.0f; return; }
 
-    if (layout == LAYOUT_FAN && uCount >= 1 && vertexCount == uCount + 1) {
+    // The layout's vertices may be followed by more: an antialiased mesh carries its skirt
+    // after the body, and the skirt is no part of the surface a matrix is read from.
+    if (layout == LAYOUT_FAN && uCount >= 1 && vertexCount >= uCount + 1) {
         float uNorm = std::fmod(std::fmod(u, 1.0f) + 1.0f, 1.0f);
         float fu = uNorm * uCount;
         int i0 = static_cast<int>(std::floor(fu)) % uCount;
@@ -477,7 +749,7 @@ inline void sampleMeshPosition(int layout, int uCount, int vCount, const float* 
         return;
     }
 
-    if (uCount >= 2 && vCount >= 2 && uCount * vCount == vertexCount) {
+    if (uCount >= 2 && vCount >= 2 && uCount * vCount <= vertexCount) {
         int i0, i1;
         float tu;
         if (wrapsU(layout)) {
@@ -629,6 +901,8 @@ class AddMesh2D : public Operation {
     std::vector<float> srcVerts, srcUv;
     std::vector<int32_t> srcColors;
     std::vector<float> widths, widthPositions;
+    // FLAG_ANTIALIAS only: how far the skirt reaches, in the mesh's units; may be a NaN id.
+    float antialiasWidth = mesh2d::DEFAULT_ANTIALIAS_WIDTH;
 
     // expanded geometry, in the layout drawVertices wants
     std::vector<float> verts, uv;
@@ -647,6 +921,7 @@ class AddMesh2D : public Operation {
             {"vCount", "INT", std::to_string(vCount)},
             {"flags", "INT", std::to_string(flags)},
             {"aux", "INT", std::to_string(aux)},
+            {"antialiasWidth", "FLOAT", formatFloat(antialiasWidth)},
         };
     }
 
@@ -668,6 +943,7 @@ class AddMesh2D : public Operation {
                 op->expressions[g].resize(static_cast<size_t>(std::max(0, len)));
                 for (int i = 0; i < len; i++) op->expressions[g][i] = buffer.readFloat();
             }
+            op->readAntialias(buffer);
             ops.push_back(std::move(op));
             return;
         }
@@ -680,6 +956,7 @@ class AddMesh2D : public Operation {
             int pn = buffer.readInt();
             op->widthPositions.resize(static_cast<size_t>(std::max(0, pn)));
             for (int i = 0; i < pn; i++) op->widthPositions[i] = buffer.readFloat();
+            op->readAntialias(buffer);   // rejects the flag: a spline strip has no colours
             ops.push_back(std::move(op));
             return;
         }
@@ -707,6 +984,7 @@ class AddMesh2D : public Operation {
             for (int i = 0; i < uvCount; i++) op->srcUv[i] = buffer.readFloat();
         }
         for (int i = 0; i < colorCount; i++) op->srcColors[i] = buffer.readInt();
+        op->readAntialias(buffer);
         ops.push_back(std::move(op));
     }
 
@@ -739,6 +1017,90 @@ class AddMesh2D : public Operation {
   private:
     bool mDirty = true;
     ExpressionEvaluator mEval;
+    // FLAG_ANTIALIAS: the boundary loops depend only on the header, so they are worked out once
+    // on read, as is the woven triangle list (on first use).
+    mesh2d::Loops mAntialiasLoops;
+    int mSkirtVertexCount = 0;
+    std::vector<int32_t> mSkirtIndices;
+    bool mSkirtIndicesReady = false;
+
+    /** Never a spline strip, which has no colours to fade. */
+    bool isAntialiased() const {
+        return (flags & mesh2d::FLAG_ANTIALIAS) != 0 && !isSplineStrip();
+    }
+
+    static long long layoutVertexCount(int layout, int u, int v) {
+        return layout == mesh2d::LAYOUT_FAN ? static_cast<long long>(u) + 1
+                                            : static_cast<long long>(u) * v;
+    }
+
+    /** The tail of the payload with FLAG_ANTIALIAS: the width. Throws, as the reference does on
+     *  read, for a mesh whose skirt cannot be built -- the skirt fades the vertex colours, so
+     *  they must be there, and grows from the boundary the layout describes, so the layout must
+     *  describe every vertex. readOperationTree turns the throw into a failed load. */
+    void readAntialias(WireBuffer& buffer) {
+        if ((flags & mesh2d::FLAG_ANTIALIAS) == 0) return;
+        antialiasWidth = buffer.readNanId();
+        if (isSplineStrip()) {
+            throw std::runtime_error("Mesh2D spline strips have no colours to antialias with");
+        }
+        // A NaN is a variable, only known at playback.
+        if (!std::isnan(antialiasWidth) && !(antialiasWidth >= 0.0f && antialiasWidth < INFINITY)) {
+            throw std::runtime_error("Mesh2D antialias width must be finite and not negative");
+        }
+        int u = uCount, v = vCount;
+        if (type == mesh2d::TYPE_EXPRESSION) {
+            bool hasColor = false;
+            for (int g = mesh2d::EXP_COLOR_A; g <= mesh2d::EXP_COLOR_B; g++) {
+                if (!expressions[g].empty()) hasColor = true;
+            }
+            if (!hasColor) {
+                throw std::runtime_error("Mesh2D antialiasing needs vertex colours; set a colour channel");
+            }
+            u = std::max(1, uCount);
+            v = std::max(1, vCount);
+            if (layoutVertexCount(layout, u, v) > mesh2d::MAX_MESH_2D_GRID
+                || mesh2d::antialiasLoops(layout, u, v).empty()) {
+                throw std::runtime_error("Mesh2D grid has no edges to antialias");
+            }
+        } else {
+            long long vertexCount = static_cast<long long>(srcVerts.size() / 2);
+            if (static_cast<long long>(srcColors.size()) != vertexCount) {
+                throw std::runtime_error("Mesh2D antialiasing needs one colour per vertex");
+            }
+            if (layoutVertexCount(layout, uCount, vCount) != vertexCount
+                || mesh2d::antialiasLoops(layout, uCount, vCount).empty()) {
+                throw std::runtime_error(
+                    "Mesh2D antialiasing needs a layout that describes every vertex");
+            }
+        }
+        int lu = std::max(1, uCount), lv = std::max(1, vCount);
+        if (layoutVertexCount(layout, lu, lv) <= mesh2d::MAX_MESH_2D_GRID) {
+            mAntialiasLoops = mesh2d::antialiasLoops(layout, lu, lv);
+        }
+        mSkirtVertexCount = mesh2d::antialiasVertexCount(mAntialiasLoops);
+    }
+
+    void appendSkirt(RemoteContext& context, int bodyVertexCount) {
+        mesh2d::appendAntialiasSkirt(layout, std::max(1, uCount), std::max(1, vCount),
+                                     mAntialiasLoops, val(context, antialiasWidth),
+                                     verts, uv, colors, bodyVertexCount);
+    }
+
+    /** The body's triangles with the skirt's woven in; topology only, so worked out once. */
+    const std::vector<int32_t>& skirtIndices(int bodyVertexCount) {
+        if (!mSkirtIndicesReady) {
+            std::vector<int32_t> body;
+            if (type == mesh2d::TYPE_EXPRESSION || isSplineStrip()) {
+                mesh2d::generateIndices(layout, std::max(1, uCount), std::max(1, vCount), body);
+            } else {
+                body = srcIndices;
+            }
+            mesh2d::antialiasIndices(body, mAntialiasLoops, bodyVertexCount, mSkirtIndices);
+            mSkirtIndicesReady = true;
+        }
+        return mSkirtIndices;
+    }
     std::vector<float> mPolyline;
     mesh2d::MonotonicSpline mWidthSpline;
 
@@ -761,16 +1123,31 @@ class AddMesh2D : public Operation {
         size_t vertexCount = n / 2;
         uv = (srcUv.size() == vertexCount * 2) ? srcUv : std::vector<float>();
         colors = (srcColors.size() == vertexCount) ? srcColors : std::vector<int32_t>();
-        indices = srcIndices;
+        // The wire format guarantees these for an antialiased mesh; without them the mesh is
+        // drawn without a skirt rather than with a wrong one.
+        bool skirt = mSkirtVertexCount > 0 && srcColors.size() == vertexCount
+                  && mesh2d::vertexCount(layout, uCount, vCount) == static_cast<int>(vertexCount);
+        if (!skirt) {
+            indices = srcIndices;
+            return;
+        }
+        size_t total = vertexCount + static_cast<size_t>(mSkirtVertexCount);
+        verts.resize(total * 2, 0.0f);
+        if (!uv.empty()) uv.resize(total * 2, 0.0f);
+        colors.resize(total, 0);
+        appendSkirt(context, static_cast<int>(vertexCount));
+        indices = skirtIndices(static_cast<int>(vertexCount));
     }
 
     int roundCapColumns() const {
         if (type != mesh2d::TYPE_SPLINE_ROUND_STRIP) return 0;
-        int cap = flags;
-        if (cap <= 0) return 0;
+        // Masked, so FLAG_ANTIALIAS in the same word is not read as cap columns.
+        int cap = flags & mesh2d::CAP_SEGMENTS_MASK;
+        if (cap < 1) return 0;
         // flags arrives from the wire; leave at least one body column.
-        int maxCap = (uCount - 2) / 2;
-        return std::max(0, std::min(cap, maxCap));
+        int columns = uCount - 1;
+        if (columns < 3) return 0;
+        return std::min(cap, (columns - 1) / 2);
     }
 
     float evaluate(RemoteContext& context, int group, float u, float v, float fallback) {
@@ -855,16 +1232,18 @@ class AddMesh2D : public Operation {
         int vCountTotal = mesh2d::vertexCount(layout, uc, vc);
         if (vCountTotal <= 0 || vCountTotal > mesh2d::MAX_MESH_2D_VERTICES) return;
 
-        verts.assign(static_cast<size_t>(vCountTotal) * 2, 0.0f);
-        uv.assign(static_cast<size_t>(vCountTotal) * 2, 0.0f);
-
         bool hasTex = !expressions[mesh2d::EXP_TEX_U].empty()
                    || !expressions[mesh2d::EXP_TEX_V].empty();
         bool hasColor = !expressions[mesh2d::EXP_COLOR_A].empty()
                      || !expressions[mesh2d::EXP_COLOR_R].empty()
                      || !expressions[mesh2d::EXP_COLOR_G].empty()
                      || !expressions[mesh2d::EXP_COLOR_B].empty();
-        colors.assign(hasColor ? static_cast<size_t>(vCountTotal) : 0, 0);
+        // As for the literal types: the skirt is its colours, so without them there is none.
+        bool skirt = mSkirtVertexCount > 0 && hasColor;
+        size_t all = static_cast<size_t>(vCountTotal) + (skirt ? mSkirtVertexCount : 0);
+        verts.assign(all * 2, 0.0f);
+        uv.assign(all * 2, 0.0f);
+        colors.assign(hasColor ? all : 0, 0);
 
         int points = 0;
         if (layout == mesh2d::LAYOUT_PATH_STRIP) {
@@ -919,7 +1298,12 @@ class AddMesh2D : public Operation {
                     evaluate(context, mesh2d::EXP_COLOR_B, u, v, 1.0f));
             }
         }
-        mesh2d::generateIndices(layout, uc, vc, indices);
+        if (skirt) {
+            appendSkirt(context, vCountTotal);
+            indices = skirtIndices(vCountTotal);
+        } else {
+            mesh2d::generateIndices(layout, uc, vc, indices);
+        }
     }
 };
 
