@@ -97,8 +97,9 @@ public:
     int keyboardType = 0, imeAction = 0, inputFlags = 0, maxLength = 0, filter = 0, hintId = 0,
         contentType = 0;
     // The first CoreText of the content bound to textId (not inside a nested text input),
-    // looked up once, at the first paint.
+    // looked up once, at the first paint; its hint is drawn by the layout, where the text is.
     Operation* boundText = nullptr;
+    std::vector<Operation*> boundPath;   // the components from the layout's child to the text
     bool boundTextResolved = false;
 
     int getOpComponentId() const override { return componentId; }

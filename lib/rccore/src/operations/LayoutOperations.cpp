@@ -264,7 +264,6 @@ static void inflateLayout(Operation* self, LayoutState& ls) {
     ls.padBeforeWidth = 0;
     ls.padBeforeHeight = 0;
     ls.ripple = nullptr;
-    ls.textInput = nullptr;
     ls.graphicsLayer = nullptr;
     ls.paintMods.clear();
     ls.animSpec = nullptr;
@@ -3183,30 +3182,150 @@ static void paintTextLines(PaintContext* pc, int tid, const std::string& text, f
     if (clip) pc->matrixRestore();
 }
 
+// A text component's text (CoreText 239, TextLayout 208), drawn at its content origin. With
+// hintOf, the hint of that text input layout instead, and only while the text is empty.
+static void paintTextContent(Operation* op, RemoteContext& ctx, PaintContext* pc, LayoutState& ls,
+                             const ComponentMeasure& m, const LayoutTextInput* hintOf) {
+    const int oc = op->opcode();
+    // Text component: draw text
+    int tid = 0;
+    float fsize = 16;
+    int col = 0;
+    int colId = -1;
+    int tAlign = 1; // TEXT_ALIGN_LEFT
+    int fWeight = 400, fStyle = 0, fFamilyId = 0;
+    int tMaxLines = INT32_MAX, tOverflow = 1;
+    float tLetterSpacing = 0, tLineAdd = 0, tLineMul = 1;
+    bool tUnderline = false, tStrike = false;
+    if (oc == 208) {
+        auto* lt = static_cast<LayoutText*>(op);
+        tMaxLines = lt->maxLines; tOverflow = lt->overflow;
+        tid = lt->textId; fsize = lt->fontSize; col = lt->color;
+        tAlign = lt->textAlign & 0xFFFF;
+        fWeight = (int)resolveVar(lt->fontWeight, ctx); fStyle = lt->fontStyle;
+        fFamilyId = lt->fontFamilyId;
+    } else {
+        auto* ct = static_cast<CoreTextOp*>(op);
+        tMaxLines = ct->maxLines; tOverflow = ct->overflow;
+        tLetterSpacing = ct->letterSpacing;
+        tUnderline = ct->underline; tStrike = ct->strikethrough;
+        tLineAdd = ct->lineHeightAdd; tLineMul = ct->lineHeightMultiplier;
+        tid = ct->textId; fsize = ct->fontSize; col = ct->color;
+        colId = ct->colorId;
+        tAlign = ct->textAlign & 0xFFFF;
+        fWeight = (int)resolveVar(ct->fontWeight, ctx); fStyle = ct->fontStyle;
+        fFamilyId = ct->fontFamilyId;
+    }
+    // Font family: generic keywords map to a FONT_TYPE (1 sans / 2 serif / 3 mono);
+    // anything else is a named system family resolved by the font manager.
+    int fFamily = 0;
+    std::string fFamName;
+    if (fFamilyId > 0) {
+        fFamName = ctx.getText(fFamilyId);
+        if (fFamName == "monospace") fFamily = 3;
+        else if (fFamName == "serif") fFamily = 2;
+        else if (fFamName == "sans-serif" || fFamName == "sans") fFamily = 1;
+        else if (!fFamName.empty()) fFamily = -1;   // a named family
+    }
+
+    // Resolve NaN-encoded variable references; a constant size is dp under DP behaviour
+    const bool constSize = !std::isnan(fsize);
+    fsize = resolveVar(fsize, ctx);
+    if (constSize) fsize *= gDpScale;
+    if (fsize <= 0 || std::isnan(fsize)) fsize = 16;
+    if (ls.autoFontSize > 0) fsize = ls.autoFontSize;   // CoreText autosize, chosen at measure
+
+    // Resolve color
+    int resolvedColor = col;
+    if (colId >= 0) {
+        resolvedColor = ctx.getColor(colId);
+    }
+
+    std::string text = ctx.getText(tid);
+    if (hintOf) {
+        // TextInputLayout.paintHint: the layout's hint in place of its empty bound text, in
+        // the text's style at 45% of its alpha, aligned as the text.
+        if (!text.empty() || hintOf->hintId == 0) return;
+        text = ctx.getText(hintOf->hintId);
+        tid = hintOf->hintId;
+        const uint32_t c = static_cast<uint32_t>(resolvedColor);
+        const uint32_t a = ((c >> 24) * 45) / 100;
+        resolvedColor = static_cast<int>((a << 24) | (c & 0x00FFFFFFu));
+    }
+    if (!text.empty()) {
+        pc->savePaint();
+        PaintBundle textPaint;
+        textPaint.addTagFloat(PaintBundle::TEXT_SIZE, fsize);
+        textPaint.addTag(PaintBundle::COLOR, resolvedColor);
+        // Apply weight / italic / family. For default-family styled text use the
+        // sans-serif family list — CoreText ignores weight/slant for a null family.
+        if (fFamily >= 0 && (fWeight != 400 || fStyle == 1 || fFamily != 0)) {
+            int effType = fFamily != 0 ? fFamily : 1;
+            textPaint.addTypeface(fWeight > 0 ? fWeight : 400, fStyle == 1, effType);
+        }
+        pc->applyPaint(textPaint);
+        // A named system family is resolved on top of the applied paint.
+        if (fFamily == -1) {
+            pc->applyTypefaceByName(fFamName, fWeight > 0 ? fWeight : 400, fStyle == 1);
+        }
+
+        float contentW = m.w - ls.paddingLeft - ls.paddingRight;
+        float contentH = m.h - ls.paddingTop - ls.paddingBottom;
+        float lineH = pc->measureTextHeight(text, fsize);
+        const float lsPx = tLetterSpacing * fsize;
+        float fullW = pc->measureTextWidth(text, fsize) + lsPx * utf8Count(text);
+        float ascent = pc->measureTextAscent(text, fsize);
+        paintTextLines(pc, tid, text, fsize, contentW, contentH, lineH, fullW, ascent,
+                       tAlign, tMaxLines, tOverflow, lsPx, tLineAdd, tLineMul, tUnderline, tStrike);
+        pc->restorePaint();
+    }
+}
+
 // TextInputLayout.findTextComponent: the first CoreText (239; a TextLayout is another class
 // there) in the content bound to the edited string, depth first, not inside a nested text input.
-static Operation* findBoundText(Operation* op, int textId) {
+// path receives the components from the layout's child down to the text.
+static bool findBoundText(Operation* op, int textId, std::vector<Operation*>& path) {
     for (auto& c : op->mChildren) {
         Operation* child = c.get();
         int oc = child->opcode();
-        if (oc == 239 && static_cast<CoreTextOp*>(child)->textId == textId) return child;
         if (oc == 60) continue;
-        if (Operation* found = findBoundText(child, textId)) return found;
+        const bool component = isLayoutComponent(child);
+        if (component) path.push_back(child);
+        if (oc == 239 && static_cast<CoreTextOp*>(child)->textId == textId) return true;
+        if (findBoundText(child, textId, path)) return true;
+        if (component) path.pop_back();
     }
-    return nullptr;
+    return false;
 }
 
-// Marks the bound text as the layout's: when the string is empty it draws the hint in its place
-// (the text paint above). Set at every paint, after the text's own inflation, which clears it.
-static void bindTextInputHint(LayoutTextInput* ti, RemoteContext& ctx) {
+// TextInputLayout.paintHint with a bound text: while the string is empty, the hint is drawn
+// where the text is (whether the text is shown or not), in its style. The canvas is at the
+// layout's content origin.
+static void paintBoundTextInputHint(LayoutTextInput* ti, PaintContext* pc, RemoteContext& ctx,
+                                    MeasurePass& measure) {
     if (!ti->boundTextResolved) {
-        ti->boundText = findBoundText(ti, ti->textId);
+        std::vector<Operation*> path;
+        if (findBoundText(ti, ti->textId, path)) ti->boundPath = path;
+        ti->boundText = ti->boundPath.empty() ? nullptr : ti->boundPath.back();
         ti->boundTextResolved = true;
     }
-    if (!ti->boundText || ti->hintId == 0) return;
+    if (!ti->boundText || ti->hintId == 0 || !ctx.getText(ti->textId).empty()) return;
+    float x = 0, y = 0;
+    for (Operation* c : ti->boundPath) {
+        int cid = getComponentId(c);
+        if (cid == -1 || !measure.contains(cid)) return;
+        auto& cm = measure.get(cid);
+        auto& cls = getLS(ctx, c);
+        inflateLayout(c, cls);
+        x += cm.x + cls.paddingLeft;
+        y += cm.y + cls.paddingTop;
+    }
     auto& tls = getLS(ctx, ti->boundText);
-    inflateLayout(ti->boundText, tls);
-    tls.textInput = ti;
+    auto& tm = measure.get(getComponentId(ti->boundText));
+    pc->matrixSave();
+    pc->matrixTranslate(x, y);
+    paintTextContent(ti->boundText, ctx, pc, tls, tm, ti);
+    pc->matrixRestore();
 }
 
 // Without a bound text, an empty string's hint is drawn at the layout's content origin, in the
@@ -3480,100 +3599,7 @@ static void paintLayoutComponent(Operation* op, RemoteContext& ctx, MeasurePass&
     // Paint children
     int oc = op->opcode();
     if (oc == 208 || oc == 239) {
-        // Text component: draw text
-        int tid = 0;
-        float fsize = 16;
-        int col = 0;
-        int colId = -1;
-        int tAlign = 1; // TEXT_ALIGN_LEFT
-        int fWeight = 400, fStyle = 0, fFamilyId = 0;
-        int tMaxLines = INT32_MAX, tOverflow = 1;
-        float tLetterSpacing = 0, tLineAdd = 0, tLineMul = 1;
-        bool tUnderline = false, tStrike = false;
-        if (oc == 208) {
-            auto* lt = static_cast<LayoutText*>(op);
-            tMaxLines = lt->maxLines; tOverflow = lt->overflow;
-            tid = lt->textId; fsize = lt->fontSize; col = lt->color;
-            tAlign = lt->textAlign & 0xFFFF;
-            fWeight = (int)resolveVar(lt->fontWeight, ctx); fStyle = lt->fontStyle;
-            fFamilyId = lt->fontFamilyId;
-        } else {
-            auto* ct = static_cast<CoreTextOp*>(op);
-            tMaxLines = ct->maxLines; tOverflow = ct->overflow;
-            tLetterSpacing = ct->letterSpacing;
-            tUnderline = ct->underline; tStrike = ct->strikethrough;
-            tLineAdd = ct->lineHeightAdd; tLineMul = ct->lineHeightMultiplier;
-            tid = ct->textId; fsize = ct->fontSize; col = ct->color;
-            colId = ct->colorId;
-            tAlign = ct->textAlign & 0xFFFF;
-            fWeight = (int)resolveVar(ct->fontWeight, ctx); fStyle = ct->fontStyle;
-            fFamilyId = ct->fontFamilyId;
-        }
-        // Font family: generic keywords map to a FONT_TYPE (1 sans / 2 serif / 3 mono);
-        // anything else is a named system family resolved by the font manager.
-        int fFamily = 0;
-        std::string fFamName;
-        if (fFamilyId > 0) {
-            fFamName = ctx.getText(fFamilyId);
-            if (fFamName == "monospace") fFamily = 3;
-            else if (fFamName == "serif") fFamily = 2;
-            else if (fFamName == "sans-serif" || fFamName == "sans") fFamily = 1;
-            else if (!fFamName.empty()) fFamily = -1;   // a named family
-        }
-
-        // Resolve NaN-encoded variable references; a constant size is dp under DP behaviour
-        const bool constSize = !std::isnan(fsize);
-        fsize = resolveVar(fsize, ctx);
-        if (constSize) fsize *= gDpScale;
-        if (fsize <= 0 || std::isnan(fsize)) fsize = 16;
-        if (ls.autoFontSize > 0) fsize = ls.autoFontSize;   // CoreText autosize, chosen at measure
-
-        // Resolve color
-        int resolvedColor = col;
-        if (colId >= 0) {
-            resolvedColor = ctx.getColor(colId);
-        }
-
-        std::string text = ctx.getText(tid);
-        // An empty text bound to a text input layout shows the layout's hint instead, at 45% of
-        // the text's alpha, aligned as the text (TextInputLayout.paintHint).
-        if (text.empty() && ls.textInput) {
-            auto* ti = static_cast<LayoutTextInput*>(ls.textInput);
-            if (ti->hintId != 0) {
-                text = ctx.getText(ti->hintId);
-                tid = ti->hintId;
-                const uint32_t c = static_cast<uint32_t>(resolvedColor);
-                const uint32_t a = ((c >> 24) * 45) / 100;
-                resolvedColor = static_cast<int>((a << 24) | (c & 0x00FFFFFFu));
-            }
-        }
-        if (!text.empty()) {
-            pc->savePaint();
-            PaintBundle textPaint;
-            textPaint.addTagFloat(PaintBundle::TEXT_SIZE, fsize);
-            textPaint.addTag(PaintBundle::COLOR, resolvedColor);
-            // Apply weight / italic / family. For default-family styled text use the
-            // sans-serif family list — CoreText ignores weight/slant for a null family.
-            if (fFamily >= 0 && (fWeight != 400 || fStyle == 1 || fFamily != 0)) {
-                int effType = fFamily != 0 ? fFamily : 1;
-                textPaint.addTypeface(fWeight > 0 ? fWeight : 400, fStyle == 1, effType);
-            }
-            pc->applyPaint(textPaint);
-            // A named system family is resolved on top of the applied paint.
-            if (fFamily == -1) {
-                pc->applyTypefaceByName(fFamName, fWeight > 0 ? fWeight : 400, fStyle == 1);
-            }
-
-            float contentW = m.w - ls.paddingLeft - ls.paddingRight;
-            float contentH = m.h - ls.paddingTop - ls.paddingBottom;
-            float lineH = pc->measureTextHeight(text, fsize);
-            const float lsPx = tLetterSpacing * fsize;
-            float fullW = pc->measureTextWidth(text, fsize) + lsPx * utf8Count(text);
-            float ascent = pc->measureTextAscent(text, fsize);
-            paintTextLines(pc, tid, text, fsize, contentW, contentH, lineH, fullW, ascent,
-                           tAlign, tMaxLines, tOverflow, lsPx, tLineAdd, tLineMul, tUnderline, tStrike);
-            pc->restorePaint();
-        }
+        paintTextContent(op, ctx, pc, ls, m, nullptr);
     } else if (oc == 93) {
         // Custom component: delegate drawing to the platform host (e.g. video). The
         // canvas is already translated to the content box; hand it (0,0)..(w,h).
@@ -3645,14 +3671,16 @@ static void paintLayoutComponent(Operation* op, RemoteContext& ctx, MeasurePass&
             }
         }
 
-        if (oc == 60) bindTextInputHint(static_cast<LayoutTextInput*>(op), ctx);
-
         // Layout manager: paint children at their positioned locations
         for (auto* child : ls.layoutChildren) {
             paintLayoutComponent(child, ctx, measure);
         }
 
-        if (oc == 60) paintUnboundTextInputHint(static_cast<LayoutTextInput*>(op), pc, ctx, m, ls);
+        if (oc == 60) {
+            auto* ti = static_cast<LayoutTextInput*>(op);
+            paintBoundTextInputHint(ti, pc, ctx, measure);
+            paintUnboundTextInputHint(ti, pc, ctx, m, ls);
+        }
     }
 
     ctx.popCanvasBounds();

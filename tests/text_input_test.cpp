@@ -6,6 +6,8 @@
 //   1 textInput "@email" { row { icon, text } }, empty -> the hint, after the icon
 //   2 a text "@city" = "Paris" (json2rc's modifier form, rewritten as a layout) -> the text
 //   3 textInput "@code" { box } on white, empty       -> the hint at the content origin, grey
+//   4 textInput "@pin" { text "@pin", invisible }, empty -> the hint where the text is (the
+//     layout draws it, as Java's paintHint, whether the text is shown or not)
 //
 //   text_input_test <fixtures dir>
 #include "rccore/WireBuffer.h"
@@ -75,6 +77,8 @@ int main(int argc, char** argv) {
     CHECK(count(1, 60, 800, 40, &max1) > 30 && max1 < 500, "field 1: the hint of a text nested in a row");
     CHECK(count(2, 60, 800, 0, &max2) > 30 && max2 > 600, "field 2: a set string draws in full colour");
     CHECK(count(3, 100, 600, 0, nullptr) > 30, "field 3: no bound text, the hint at the content origin");
+    int max4 = 0;
+    CHECK(count(4, 60, 800, 0, &max4) > 30 && max4 < 500, "field 4: an invisible bound text still gets its hint");
 
     std::fprintf(stderr, failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", failures);
     return failures ? 1 : 0;

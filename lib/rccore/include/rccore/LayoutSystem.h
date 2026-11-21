@@ -160,7 +160,6 @@ struct LayoutState {
     float offsetX = 0, offsetY = 0;
     bool hasOffset = false;
     Operation* ripple = nullptr;     // the component's ModifierRipple, if it has one
-    Operation* textInput = nullptr;  // the LayoutTextInput this text is bound to: empty, it draws the hint
     Operation* animSpec = nullptr;   // its ANIMATION_SPEC modifier (14), if it has one
     // MODIFIER_COLLAPSIBLE_PRIORITY (235): how long it stays in a collapsible row/column.
     bool hasCollapsePriority = false;
