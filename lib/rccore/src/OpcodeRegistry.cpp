@@ -159,8 +159,9 @@ void OpcodeRegistry::init() {
     reg({211, "MODIFIER_VISIBILITY", {{"visibilityId", FT::INT}}});
     reg({221, "MODIFIER_OFFSET", {{"x", FT::FLOAT}, {"y", FT::FLOAT}}});
     reg({223, "MODIFIER_ZINDEX", {{"zIndex", FT::FLOAT}}});
-    reg({60, "MODIFIER_TEXT_INPUT", {{"textId", FT::INT}, {"keyboardType", FT::INT}, {"imeAction", FT::INT},
-         {"flags", FT::INT}, {"maxLength", FT::INT}, {"filter", FT::INT}, {"hintId", FT::INT}}});
+    // The ids, then a sparse attribute list (short count, byte id + int value pairs).
+    reg({60, "LAYOUT_TEXT_INPUT", {{"componentId", FT::INT}, {"animationId", FT::INT},
+         {"textId", FT::INT}}, true, false});
     reg({55, "MODIFIER_BACKGROUND", {{"flags", FT::INT}, {"colorId", FT::INT},
         {"reserve1", FT::INT}, {"reserve2", FT::INT},
         {"r", FT::FLOAT}, {"g", FT::FLOAT}, {"b", FT::FLOAT}, {"a", FT::FLOAT},

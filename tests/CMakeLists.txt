@@ -74,3 +74,9 @@ add_test(NAME binary_data
 # (Java, C++, TypeScript) in rcJson's tools/xcheck.
 add_executable(mesh2d_dump mesh2d_dump.cpp)
 target_link_libraries(mesh2d_dump PRIVATE rccore)
+
+# LAYOUT_TEXT_INPUT reads as a box and an empty string shows the hint (androidx 7f6f9150bc8).
+add_executable(text_input_test text_input_test.cpp)
+target_link_libraries(text_input_test PRIVATE rcskia rccore skia_lib)
+add_test(NAME text_input
+         COMMAND text_input_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")

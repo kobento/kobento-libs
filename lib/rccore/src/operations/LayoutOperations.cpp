@@ -236,8 +236,7 @@ static bool isModifierOp(const Operation* op) {
            // 243 MODIFIER_DIMENSION_CONSTRAINTS (requiredWidthIn/requiredHeightIn) and
            // 250 ACCESSIBILITY_SEMANTICS are modifiers too. Omitting them here meant
            // the switch below never saw them: 243's constraints were silently dropped.
-           oc == 243 || oc == 250 ||
-           oc == 60;   // MODIFIER_TEXT_INPUT
+           oc == 243 || oc == 250;
 }
 
 static bool isLayoutComponent(const Operation* op) {
@@ -245,7 +244,8 @@ static bool isLayoutComponent(const Operation* op) {
     // 208 (LAYOUT_TEXT) is included — Java treats it as a layout component.
     return oc == 200 || oc == 202 || oc == 203 || oc == 204 || oc == 205 ||
            oc == 207 || oc == 208 || oc == 217 || oc == 239 || oc == 240 ||
-           oc == 176 || oc == 230 || oc == 233 || oc == 234 || oc == 93;
+           oc == 176 || oc == 230 || oc == 233 || oc == 234 || oc == 93 ||
+           oc == 60;   // LAYOUT_TEXT_INPUT, a box
 }
 
 static bool isContentWrapper(const Operation* op) {
@@ -368,9 +368,6 @@ static void inflateLayout(Operation* self, LayoutState& ls) {
                     }
                     break;
                 }
-                case 60:  // ModifierTextInput: inert here (no editor), but an empty text shows its hint
-                    ls.textInput = child;
-                    break;
                 case 229: // ModifierRipple
                     ls.ripple = child;
                     ls.paintMods.push_back({child});
@@ -787,6 +784,7 @@ static int getComponentId(const Operation* op) {
     switch (op->opcode()) {
         case 200: return static_cast<const LayoutRoot*>(op)->componentId;
         case 202: return static_cast<const LayoutBox*>(op)->componentId;
+        case 60: return static_cast<const LayoutTextInput*>(op)->componentId;
         case 203: return static_cast<const LayoutRow*>(op)->componentId;
         case 204: return static_cast<const LayoutColumn*>(op)->componentId;
         case 205: return static_cast<const LayoutCanvas*>(op)->componentId;
@@ -2146,6 +2144,9 @@ static void layoutManager(Operation* op, RemoteContext& ctx, MeasurePass& measur
         if (oc == 202) {
             hPos = static_cast<LayoutBox*>(op)->horizontal;
             vPos = static_cast<LayoutBox*>(op)->vertical;
+        } else if (oc == 60) {
+            hPos = 1;   // TextInputLayout is a BoxLayout(START, TOP)
+            vPos = 4;
         } else if (oc == 176) {
             // FitBoxLayout.internalLayoutMeasure positions the shown child by its own
             // horizontal/vertical positioning, like a box.
@@ -2224,6 +2225,7 @@ static void layoutManager(Operation* op, RemoteContext& ctx, MeasurePass& measur
 static int getOpAnimationId(const Operation* op) {
     switch (op->opcode()) {
         case 202: return static_cast<const LayoutBox*>(op)->animationId;
+        case 60: return static_cast<const LayoutTextInput*>(op)->animationId;
         case 203: return static_cast<const LayoutRow*>(op)->animationId;
         case 204: return static_cast<const LayoutColumn*>(op)->animationId;
         case 205: return static_cast<const LayoutCanvas*>(op)->animationId;
@@ -3181,6 +3183,55 @@ static void paintTextLines(PaintContext* pc, int tid, const std::string& text, f
     if (clip) pc->matrixRestore();
 }
 
+// TextInputLayout.findTextComponent: the first CoreText (239; a TextLayout is another class
+// there) in the content bound to the edited string, depth first, not inside a nested text input.
+static Operation* findBoundText(Operation* op, int textId) {
+    for (auto& c : op->mChildren) {
+        Operation* child = c.get();
+        int oc = child->opcode();
+        if (oc == 239 && static_cast<CoreTextOp*>(child)->textId == textId) return child;
+        if (oc == 60) continue;
+        if (Operation* found = findBoundText(child, textId)) return found;
+    }
+    return nullptr;
+}
+
+// Marks the bound text as the layout's: when the string is empty it draws the hint in its place
+// (the text paint above). Set at every paint, after the text's own inflation, which clears it.
+static void bindTextInputHint(LayoutTextInput* ti, RemoteContext& ctx) {
+    if (!ti->boundTextResolved) {
+        ti->boundText = findBoundText(ti, ti->textId);
+        ti->boundTextResolved = true;
+    }
+    if (!ti->boundText || ti->hintId == 0) return;
+    auto& tls = getLS(ctx, ti->boundText);
+    inflateLayout(ti->boundText, tls);
+    tls.textInput = ti;
+}
+
+// Without a bound text, an empty string's hint is drawn at the layout's content origin, in the
+// default text style (36, black) at 45% alpha. The canvas is at the content origin here.
+static void paintUnboundTextInputHint(LayoutTextInput* ti, PaintContext* pc, RemoteContext& ctx,
+                                      const ComponentMeasure& m, const LayoutState& ls) {
+    if (ti->boundText || ti->hintId == 0 || !ctx.getText(ti->textId).empty()) return;
+    std::string hint = ctx.getText(ti->hintId);
+    if (hint.empty()) return;
+    const float fsize = 36 * gDpScale;
+    pc->savePaint();
+    PaintBundle paint;
+    paint.addTagFloat(PaintBundle::TEXT_SIZE, fsize);
+    paint.addTag(PaintBundle::COLOR, static_cast<int>(((0xFFu * 45 / 100) << 24)));
+    pc->applyPaint(paint);
+    float contentW = m.w - ls.paddingLeft - ls.paddingRight;
+    float contentH = m.h - ls.paddingTop - ls.paddingBottom;
+    float lineH = pc->measureTextHeight(hint, fsize);
+    float fullW = pc->measureTextWidth(hint, fsize);
+    float ascent = pc->measureTextAscent(hint, fsize);
+    paintTextLines(pc, ti->hintId, hint, fsize, contentW, contentH, lineH, fullW, ascent,
+                   1 /* left */, 1, 1 /* clip */, 0, 0, 1, false, false);
+    pc->restorePaint();
+}
+
 static void paintLayoutComponent(Operation* op, RemoteContext& ctx, MeasurePass& measure) {
     auto* pc = ctx.getPaintContext();
     if (!pc) return;
@@ -3484,10 +3535,10 @@ static void paintLayoutComponent(Operation* op, RemoteContext& ctx, MeasurePass&
         }
 
         std::string text = ctx.getText(tid);
-        // An empty editable text shows its hint instead, at 45% of the text's alpha
-        // (TextInputModifierOperation.paintHint, androidx CL 4451608).
+        // An empty text bound to a text input layout shows the layout's hint instead, at 45% of
+        // the text's alpha, aligned as the text (TextInputLayout.paintHint).
         if (text.empty() && ls.textInput) {
-            auto* ti = static_cast<ModifierTextInput*>(ls.textInput);
+            auto* ti = static_cast<LayoutTextInput*>(ls.textInput);
             if (ti->hintId != 0) {
                 text = ctx.getText(ti->hintId);
                 tid = ti->hintId;
@@ -3594,10 +3645,14 @@ static void paintLayoutComponent(Operation* op, RemoteContext& ctx, MeasurePass&
             }
         }
 
+        if (oc == 60) bindTextInputHint(static_cast<LayoutTextInput*>(op), ctx);
+
         // Layout manager: paint children at their positioned locations
         for (auto* child : ls.layoutChildren) {
             paintLayoutComponent(child, ctx, measure);
         }
+
+        if (oc == 60) paintUnboundTextInputHint(static_cast<LayoutTextInput*>(op), pc, ctx, m, ls);
     }
 
     ctx.popCanvasBounds();
@@ -3990,6 +4045,10 @@ void LayoutComponentContent::apply(RemoteContext& context) {
 }
 
 void LayoutBox::apply(RemoteContext& context) {
+    applyChildrenWithUpdate(mChildren, context);
+}
+
+void LayoutTextInput::apply(RemoteContext& context) {
     applyChildrenWithUpdate(mChildren, context);
 }
 

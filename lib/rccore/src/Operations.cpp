@@ -196,7 +196,7 @@ void Operations::init() {
     registerReader(MODIFIER_HEIGHT_IN, "MODIFIER_HEIGHT_IN", ModifierHeightIn::read);
     registerReader(MODIFIER_OFFSET, "MODIFIER_OFFSET", ModifierOffset::read);
     registerReader(MODIFIER_ZINDEX, "MODIFIER_ZINDEX", ModifierZIndex::read);
-    registerReader(MODIFIER_TEXT_INPUT, "MODIFIER_TEXT_INPUT", ModifierTextInput::read);
+    registerReader(LAYOUT_TEXT_INPUT, "LAYOUT_TEXT_INPUT", LayoutTextInput::read);
     registerReader(MODIFIER_TOUCH_DOWN, "MODIFIER_TOUCH_DOWN", ModifierTouchDown::read);
     registerReader(MODIFIER_TOUCH_UP, "MODIFIER_TOUCH_UP", ModifierTouchUp::read);
     registerReader(MODIFIER_TOUCH_CANCEL, "MODIFIER_TOUCH_CANCEL", ModifierTouchCancel::read);

@@ -3,6 +3,8 @@
 #include "rccore/WireBuffer.h"
 #include <vector>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 
 namespace rccore {
 
@@ -77,6 +79,70 @@ public:
         op->animationId = buf.declareId();
         op->horizontal = buf.readInt();
         op->vertical = buf.readInt();
+        ops.push_back(std::move(op));
+    }
+};
+
+// ── LayoutTextInput (60) ────────────────────────────────────────────────
+// TextInputLayout (androidx 7f6f9150bc8): a box (start/top) whose content shows a string the
+// user can edit. The ids are followed by a sparse attribute list: a short count, then byte id /
+// int value pairs, defaults omitted. This engine has no editor, so the layout is a box, as on a
+// reference player without TextInputSupport; an empty string still shows the hint, in place of
+// the CoreText bound to it (or at the layout's content origin when there is none).
+class LayoutTextInput : public Operation {
+public:
+    static constexpr int P_KEYBOARD_TYPE = 1, P_IME_ACTION = 2, P_INPUT_FLAGS = 3,
+                         P_MAX_LENGTH = 4, P_FILTER = 5, P_HINT_ID = 6, P_CONTENT_TYPE = 7;
+    int componentId = 0, animationId = 0, textId = 0;
+    int keyboardType = 0, imeAction = 0, inputFlags = 0, maxLength = 0, filter = 0, hintId = 0,
+        contentType = 0;
+    // The first CoreText of the content bound to textId (not inside a nested text input),
+    // looked up once, at the first paint.
+    Operation* boundText = nullptr;
+    bool boundTextResolved = false;
+
+    int getOpComponentId() const override { return componentId; }
+    void setOpComponentId(int v) override { componentId = v; }
+    std::string name() const override { return "LAYOUT_TEXT_INPUT"; }
+    int opcode() const override { return 60; }
+    std::vector<Field> fields() const override {
+        return {{"componentId", "INT", std::to_string(componentId)},
+                {"animationId", "INT", std::to_string(animationId)},
+                {"textId", "INT", std::to_string(textId)},
+                {"keyboardType", "INT", std::to_string(keyboardType)},
+                {"imeAction", "INT", std::to_string(imeAction)},
+                {"inputFlags", "INT", std::to_string(inputFlags)},
+                {"maxLength", "INT", std::to_string(maxLength)},
+                {"filter", "INT", std::to_string(filter)},
+                {"hintId", "INT", std::to_string(hintId)},
+                {"contentType", "INT", std::to_string(contentType)}};
+    }
+    bool isContainer() const override { return true; }
+    void apply(RemoteContext& context) override;
+
+    static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
+        auto op = std::make_unique<LayoutTextInput>();
+        op->componentId = buf.declareId();
+        op->animationId = buf.declareId();
+        op->textId = buf.readId();
+        int count = buf.readShort();
+        for (int i = 0; i < count; i++) {
+            int id = buf.readByte();
+            // Every attribute is an INT so far: an unknown one cannot be sized.
+            if (id < P_KEYBOARD_TYPE || id > P_CONTENT_TYPE) {
+                throw std::runtime_error("LAYOUT_TEXT_INPUT: unknown attribute " + std::to_string(id));
+            }
+            int v = buf.readInt();
+            switch (id) {
+                case P_KEYBOARD_TYPE: op->keyboardType = v; break;
+                case P_IME_ACTION: op->imeAction = v; break;
+                case P_INPUT_FLAGS: op->inputFlags = v; break;
+                case P_MAX_LENGTH: op->maxLength = v; break;
+                case P_FILTER: op->filter = v; break;
+                case P_HINT_ID: op->hintId = buf.remapId(v); break;   // remapped in a pattern
+                case P_CONTENT_TYPE: op->contentType = v; break;
+            }
+        }
         ops.push_back(std::move(op));
     }
 };
@@ -785,29 +851,6 @@ public:
     static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
         auto op = std::make_unique<ModifierZIndex>();
         op->zIndex = buf.readNanId();
-        ops.push_back(std::move(op));
-    }
-};
-
-// MODIFIER_TEXT_INPUT (60, androidx CL 4451608): the string a component shows is editable.
-// Read and kept inert: this engine has no text input, so the component shows its text, as the
-// reference does on a player without TextInputSupport.
-class ModifierTextInput : public Operation {
-public:
-    int textId = 0, keyboardType = 0, imeAction = 0, flags = 0, maxLength = 0, filter = 0, hintId = 0;
-    std::string name() const override { return "MODIFIER_TEXT_INPUT"; }
-    int opcode() const override { return 60; }
-    std::vector<Field> fields() const override {
-        return {{"textId", "INT", std::to_string(textId)}, {"keyboardType", "INT", std::to_string(keyboardType)},
-                {"imeAction", "INT", std::to_string(imeAction)}, {"flags", "INT", std::to_string(flags)},
-                {"maxLength", "INT", std::to_string(maxLength)}, {"filter", "INT", std::to_string(filter)},
-                {"hintId", "INT", std::to_string(hintId)}};
-    }
-    void apply(RemoteContext&) override {}
-    static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
-        auto op = std::make_unique<ModifierTextInput>();
-        op->textId = buf.readInt(); op->keyboardType = buf.readInt(); op->imeAction = buf.readInt();
-        op->flags = buf.readInt(); op->maxLength = buf.readInt(); op->filter = buf.readInt(); op->hintId = buf.readInt();
         ops.push_back(std::move(op));
     }
 };
