@@ -53,7 +53,8 @@ static std::vector<std::pair<int, float>> run(const std::string& path, int W, in
     float now = 0;
     auto frame = [&] {
         now += 0.016f;
-        ctx.loadFloat(rccore::RemoteContext::ID_ANIMATION_TIME, now);
+        // Override, not load: the document writes the wall clock into this id every frame.
+        ctx.overrideFloat(rccore::RemoteContext::ID_ANIMATION_TIME, now);
         canvas->clear(SK_ColorBLACK);
         doc.applyDataOperations(ctx, -2);
         doc.paint(ctx, -2);
