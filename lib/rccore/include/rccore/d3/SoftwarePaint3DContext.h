@@ -45,6 +45,9 @@ public:
     void matrix3Op(int sub, const std::vector<float>& args);
     void drawMesh3D(int meshId, int mode);
     void clearDepth3D();
+    /** Clears the colour to transparent and keeps the depth: what was composited is gone, and
+     *  later meshes of the pass still depth-test against it. */
+    void clearColor3D();
     void setLights3D(const std::vector<int>& types, const std::vector<int32_t>& colors,
                      const std::vector<float>& params);
     void setMaterial3D(float specStrength, float shininess);

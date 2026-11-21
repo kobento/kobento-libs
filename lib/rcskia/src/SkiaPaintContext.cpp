@@ -373,35 +373,42 @@ static SkPath trimPath(const SkPath& path, float start, float end) {
 // ── Drawing ───────────────────────────────────────────────────────────
 
 void SkiaPaintContext::drawRect(float left, float top, float right, float bottom) {
+    flush3D();
     mCanvas->drawRect(SkRect::MakeLTRB(left, top, right, bottom), mPaint);
 }
 
 void SkiaPaintContext::drawCircle(float cx, float cy, float radius) {
+    flush3D();
     mCanvas->drawCircle(cx, cy, radius, mPaint);
 }
 
 void SkiaPaintContext::drawLine(float x1, float y1, float x2, float y2) {
+    flush3D();
     mCanvas->drawLine(x1, y1, x2, y2, mPaint);
 }
 
 void SkiaPaintContext::drawOval(float left, float top, float right, float bottom) {
+    flush3D();
     mCanvas->drawOval(SkRect::MakeLTRB(left, top, right, bottom), mPaint);
 }
 
 void SkiaPaintContext::drawArc(float left, float top, float right, float bottom,
                                float startAngle, float sweepAngle) {
+    flush3D();
     mCanvas->drawArc(SkRect::MakeLTRB(left, top, right, bottom),
                      startAngle, sweepAngle, false, mPaint);
 }
 
 void SkiaPaintContext::drawRoundRect(float left, float top, float right, float bottom,
                                      float rx, float ry) {
+    flush3D();
     SkRect rect = SkRect::MakeLTRB(left, top, right, bottom);
     mCanvas->drawRoundRect(rect, rx, ry, mPaint);
 }
 
 void SkiaPaintContext::drawSector(float left, float top, float right, float bottom,
                                   float startAngle, float sweepAngle) {
+    flush3D();
     // Sector = arc with useCenter=true
     mCanvas->drawArc(SkRect::MakeLTRB(left, top, right, bottom),
                      startAngle, sweepAngle, true, mPaint);
@@ -442,6 +449,7 @@ void SkiaPaintContext::setMesh(int meshId, int layout, int uCount, int vCount,
 }
 
 void SkiaPaintContext::drawMesh(int meshId, int blend, int imageId) {
+    flush3D();
     auto it = mMeshes2D.find(meshId);
     if (it == mMeshes2D.end()) return;
     const Mesh2DEntry& e = it->second;
@@ -484,6 +492,7 @@ void SkiaPaintContext::drawMesh(int meshId, int blend, int imageId) {
 }
 
 void SkiaPaintContext::matrixFromMesh(int meshId, float u, float v, int flags) {
+    flush3D();
     auto it = mMeshes2D.find(meshId);
     if (it == mMeshes2D.end()) return;
     float frame[6];
@@ -505,6 +514,7 @@ void SkiaPaintContext::matrixFromMesh(int meshId, float u, float v, int flags) {
 }
 
 void SkiaPaintContext::drawPath(int pathId, float start, float end) {
+    flush3D();
     // Rebuild path from stored float data to resolve NaN variable refs
     auto fit = mPathFloatData.find(pathId);
     if (fit != mPathFloatData.end()) {
@@ -528,6 +538,7 @@ void SkiaPaintContext::drawPath(int pathId, float start, float end) {
 
 void SkiaPaintContext::drawTweenPath(int path1Id, int path2Id, float tween,
                                      float start, float end) {
+    flush3D();
     // Get path data for both paths
     SkPath path1, path2;
     bool has1 = false, has2 = false;
@@ -665,6 +676,7 @@ sk_sp<SkImage> SkiaPaintContext::imageFor(int imageId) {
 
 void SkiaPaintContext::drawBitmap(int imageId, float left, float top,
                                   float right, float bottom) {
+    flush3D();
     auto img = imageFor(imageId);
     if (!img) return;
     SkRect dst = SkRect::MakeLTRB(left, top, right, bottom);
@@ -675,6 +687,7 @@ void SkiaPaintContext::drawBitmapInt(int imageId,
                                      int srcL, int srcT, int srcR, int srcB,
                                      int dstL, int dstT, int dstR, int dstB,
                                      int cdId) {
+    flush3D();
     auto img = imageFor(imageId);
     if (!img) return;
     SkRect src = SkRect::MakeLTRB(srcL, srcT, srcR, srcB);
@@ -708,6 +721,7 @@ static size_t utf16IndexToUtf8Offset(const std::string& utf8, int charIndex) {
 void SkiaPaintContext::drawTextRun(int textId, int start, int end,
                                    int contextStart, int contextEnd,
                                    float x, float y, bool rtl) {
+    flush3D();
     auto it = mTexts.find(textId);
     if (it == mTexts.end()) return;
 
@@ -732,6 +746,7 @@ void SkiaPaintContext::drawTextRun(int textId, int start, int end,
 
 void SkiaPaintContext::drawTextAnchored(int textId, float x, float y,
                                         float panX, float panY, int flags) {
+    flush3D();
     auto it = mTexts.find(textId);
     if (it == mTexts.end()) return;
 
@@ -773,6 +788,7 @@ void SkiaPaintContext::drawTextAnchored(int textId, float x, float y,
 
 void SkiaPaintContext::drawTextOnPath(int textId, int pathId,
                                       float hOffset, float vOffset) {
+    flush3D();
     auto textIt = mTexts.find(textId);
     auto pathIt = mPaths.find(pathId);
     if (textIt == mTexts.end() || pathIt == mPaths.end()) return;
@@ -862,15 +878,18 @@ void SkiaPaintContext::restorePaint() {
 // ── Transform ─────────────────────────────────────────────────────────
 
 void SkiaPaintContext::matrixSave() {
+    flush3D();
     mCanvas->save();
 }
 
 void SkiaPaintContext::matrixRestore() {
+    flush3D();
     mCanvas->restore();
 }
 
 void SkiaPaintContext::saveLayerAlpha(float alpha, float left, float top,
                                       float right, float bottom) {
+    flush3D();
     if (alpha < 0.0f) alpha = 0.0f;
     if (alpha > 1.0f) alpha = 1.0f;
     SkRect bounds = SkRect::MakeLTRB(left, top, right, bottom);
@@ -908,6 +927,7 @@ void SkiaPaintContext::applyTypefaceByName(const std::string& family, int weight
 
 void SkiaPaintContext::saveLayerWithBlur(float sigmaX, float sigmaY,
                                          float left, float top, float right, float bottom) {
+    flush3D();
     // Blur render effect: draw the layer's content through a gaussian blur image filter
     // (the Skia equivalent of Android RenderEffect.createBlurEffect). Expand the layer
     // bounds by ~3σ so the blurred halo isn't clipped.
@@ -919,10 +939,12 @@ void SkiaPaintContext::saveLayerWithBlur(float sigmaX, float sigmaY,
 }
 
 void SkiaPaintContext::restoreLayer() {
+    flush3D();
     mCanvas->restore();
 }
 
 void SkiaPaintContext::matrixScale(float sx, float sy, float cx, float cy) {
+    flush3D();
     if (std::isnan(sx) || std::isnan(sy) || std::isinf(sx) || std::isinf(sy)) return;
     mCanvas->translate(cx, cy);
     mCanvas->scale(sx, sy);
@@ -930,24 +952,29 @@ void SkiaPaintContext::matrixScale(float sx, float sy, float cx, float cy) {
 }
 
 void SkiaPaintContext::matrixTranslate(float dx, float dy) {
+    flush3D();
     mCanvas->translate(dx, dy);
 }
 
 void SkiaPaintContext::matrixRotate(float degrees, float cx, float cy) {
+    flush3D();
     mCanvas->rotate(degrees, cx, cy);
 }
 
 void SkiaPaintContext::matrixSkew(float sx, float sy) {
+    flush3D();
     mCanvas->skew(sx, sy);
 }
 
 // ── Clipping ──────────────────────────────────────────────────────────
 
 void SkiaPaintContext::clipRect(float left, float top, float right, float bottom) {
+    flush3D();
     mCanvas->clipRect(SkRect::MakeLTRB(left, top, right, bottom));
 }
 
 void SkiaPaintContext::clipPath(int pathId, int regionOp) {
+    flush3D();
     auto it = mPaths.find(pathId);
     if (it != mPaths.end()) {
         mCanvas->clipPath(it->second, /*doAntiAlias=*/true);   // curved clips: no stair-stepped edges
@@ -956,6 +983,7 @@ void SkiaPaintContext::clipPath(int pathId, int regionOp) {
 
 void SkiaPaintContext::roundedClipRect(float w, float h, float topStart, float topEnd,
                                         float bottomStart, float bottomEnd) {
+    flush3D();
     SkPath path;
     // Create rounded rect path with per-corner radii
     // SkRRect uses: top-left, top-right, bottom-right, bottom-left
@@ -1266,6 +1294,7 @@ struct SkiaPaintContext::OffscreenBitmap {
 };
 
 void SkiaPaintContext::beginDrawToBitmap(int bitmapId, int mode, int color) {
+    flush3D();
     if (bitmapId == 0) return;
 
     // Get the existing image to determine dimensions
@@ -1315,6 +1344,7 @@ void SkiaPaintContext::beginDrawToBitmap(int bitmapId, int mode, int color) {
 }
 
 void SkiaPaintContext::endDrawToBitmap() {
+    flush3D();
     if (!mMainCanvas || !mOffscreenBitmap || mActiveBitmapId == 0) return;
 
     // Store the rendered bitmap as an image
@@ -1996,11 +2026,24 @@ void SkiaPaintContext::Skia3D::drawMesh3D(int meshId, int mode) {
         return;
     }
     // Software, and the fallback for backends this player does not implement (drawMesh, GL).
+    // The buffer is blitted lazily (flush): a run of meshes goes onto the canvas once.
+    // Blitting the accumulated buffer after every mesh drew each earlier mesh again, and an
+    // edge pixel the supersampled buffer leaves partly covered, drawn over itself N times,
+    // turns opaque: every edge came out stepped. 2D still interleaves in document order:
+    // every 2D draw, transform or clip flushes first.
     c->drawMesh3D(meshId, mode);
+    mPending = true;
+}
+
+void SkiaPaintContext::Skia3D::flush() {
+    if (!mPending) return;
+    mPending = false;
     blit();
+    mCtx.clearColor3D();
 }
 
 void SkiaPaintContext::Skia3D::clearDepth3D() {
+    flush();
     if (auto* c = ensure()) c->clearDepth3D();
 }
 
@@ -2011,6 +2054,7 @@ void SkiaPaintContext::Skia3D::setLights3D(const std::vector<int>& types,
 }
 
 void SkiaPaintContext::Skia3D::drawMesh3DCanvas(int meshId, bool smooth) {
+    flush();   // software meshes drawn before this one go on first
     auto* c = ensure();
     if (!c) return;
     auto& cm = mCanvasMesh;

@@ -148,6 +148,7 @@ public:
      * 3D op begins with this downcast and silently no-ops when it yields null.
      */
     rccore::Paint3D* asPaint3D() override { return &m3D; }
+    void flush3D() override { m3D.flush(); }
 
 private:
     /**
@@ -175,6 +176,8 @@ private:
         void setMaterial3D(float specStrength, float shininess) override;
         void setDepthBias3D(float constant, float slope) override;
         void setSupersample(int k) { mSuper = k < 1 ? 1 : k; }
+        /** Blit the software meshes drawn since the last flush, once, then clear their colour. */
+        void flush();
 
     private:
         /** Size the software buffer to the canvas. Null if the canvas has no area yet. */
@@ -187,6 +190,8 @@ private:
         SkiaPaintContext& mOwner;
         rccore::d3::SoftwarePaint3DContext mCtx;
         bool mSized = false;
+        /** Software meshes drawn and not yet blitted (a run goes onto the canvas once). */
+        bool mPending = false;
         int mSuper = 1;
         /** Reused across frames so a per-frame rebuild does not reallocate. */
         rccore::d3::SoftwarePaint3DContext::CanvasMesh mCanvasMesh;

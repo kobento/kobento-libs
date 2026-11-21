@@ -42,6 +42,9 @@ class PaintContext {
 public:
     explicit PaintContext(RemoteContext& context) : mContext(context) {}
     virtual ~PaintContext() = default;
+    /** Composite 3D drawn but not yet on the canvas (a run of meshes goes on once: see
+     *  SkiaPaintContext). Called before other drawing and at the end of a frame. */
+    virtual void flush3D() {}
 
     RemoteContext& getContext() { return mContext; }
 

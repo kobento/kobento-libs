@@ -267,6 +267,7 @@ void CoreDocument::paint(RemoteContext& context, int theme) {
     }
 
     applyOperations(context, mOperations, theme);
+    pc->flush3D();   // the last run of 3D meshes, if nothing drew after it
 
     // Restore canvas state
     pc->matrixRestore();

@@ -146,6 +146,10 @@ void SoftwarePaint3DContext::clearDepth3D() {
     std::fill(mColor.begin(), mColor.end(), 0);
 }
 
+void SoftwarePaint3DContext::clearColor3D() {
+    std::fill(mColor.begin(), mColor.end(), 0);
+}
+
 void SoftwarePaint3DContext::setLights3D(const std::vector<int>& types,
                                          const std::vector<int32_t>& colors,
                                          const std::vector<float>& params) {
