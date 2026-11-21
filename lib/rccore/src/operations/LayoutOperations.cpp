@@ -3169,7 +3169,11 @@ static void paintTextLines(PaintContext* pc, int tid, const std::string& text, f
     }
     // The count uses the lines as painted (fullW is the unwrapped width: a wrapped text is
     // not cut just because it wrapped).
-    if (anyCut || truncated || widest > contentW + 0.5f || textH > contentH + 0.5f) {
+    // A text laid out at no width or no height shows nothing at all: it is hidden (a row
+    // collapsed to 0 dp on purpose, a list's unused rows), not cut. zero_size reports a
+    // component that should have had a size.
+    const bool collapsed = contentW <= 0.5f || contentH <= 0.5f;
+    if (!collapsed && (anyCut || truncated || widest > contentW + 0.5f || textH > contentH + 0.5f)) {
         // An ellipsis on the last line does not excuse an earlier line cut at the box's edge.
         const char* kind = wordCut ? "clipped" : ellipsis ? "ellipsized" : truncated ? "truncated" : "clipped";
         if (wordCut) gTextOverflow.clipped++;
