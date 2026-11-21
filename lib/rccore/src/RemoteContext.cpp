@@ -11,6 +11,11 @@ namespace rccore {
 
 void RemoteContext::loadText(int id, const std::string& text) {
     if (mTextOverrides.count(id)) return;   // RemoteComposeState.updateData: !mDataOverride[id]
+    // A changed string re-measures the texts showing it (Java: CoreText listens to its text
+    // id and invalidates its measure); without this a text took a new, longer string at the
+    // width it measured for the old one ("Lisbon" -> "Reykja").
+    auto it = mTexts.find(id);
+    if (it != mTexts.end() && it->second != text) mLayoutEpoch++;
     mTexts[id] = text;
     notifyListeners(id);
     if (mPaintContext) {

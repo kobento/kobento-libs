@@ -80,3 +80,8 @@ add_executable(text_input_test text_input_test.cpp)
 target_link_libraries(text_input_test PRIVATE rcskia rccore skia_lib)
 add_test(NAME text_input
          COMMAND text_input_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
+add_executable(scroll_lookup_test scroll_lookup_test.cpp)
+target_link_libraries(scroll_lookup_test PRIVATE rcskia rccore skia_lib)
+add_test(NAME scroll_lookup
+         COMMAND scroll_lookup_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")

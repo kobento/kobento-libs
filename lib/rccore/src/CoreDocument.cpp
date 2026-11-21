@@ -290,6 +290,11 @@ void CoreDocument::applyOperations(RemoteContext& context,
         }
 
         if (shouldApply) {
+            // A declared variable is set once (Java applies an operation in paint only when it
+            // is dirty or paints, and its data pass leaves the constants clean). Re-applying it
+            // every pass put its initial value back over what a touch wrote: a scroll position
+            // read before the scroll paints (a lookup in the global section) stayed at 0.
+            if (!op->isDirty() && dynamic_cast<FloatConstant*>(op.get())) continue;
             // If the operation supports variables and is dirty, update cached values
             if (op->isVariableSupport() && op->isDirty()) {
                 op->updateVariables(context);

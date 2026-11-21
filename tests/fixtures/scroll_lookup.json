@@ -1,0 +1,10 @@
+{"header": {"width": 300, "height": 300, "profiles": 513},
+ "resources": {"variables": {"pos": 0}},
+ "root": {"column": {"modifiers": ["fillMaxSize"], "children": [
+  {"canvas": {"modifiers": [{"size": 0}], "commands": [{"global": {"commands": [
+   {"addDataList": {"id": "names", "list": ["One", "Two", "A much longer third name", "Four"]}},
+   {"textLookup": {"array": "@names", "index": "round(@pos / 300)", "varName": "name"}}]}}]}},
+  {"text": {"value": "@name", "fontSize": 18, "fontWeight": 600, "modifiers": [{"id": 501}]}},
+  {"row": {"modifiers": ["fillMaxWidth", {"verticalWeight": 1}, {"horizontalScroll": {"position": "@pos", "notches": 4}}],
+   "children": [{"box": {"modifiers": [{"width": 300}, "fillMaxHeight"]}}, {"box": {"modifiers": [{"width": 300}, "fillMaxHeight"]}},
+                {"box": {"modifiers": [{"width": 300}, "fillMaxHeight"]}}, {"box": {"modifiers": [{"width": 300}, "fillMaxHeight"]}}]}}]}}}
