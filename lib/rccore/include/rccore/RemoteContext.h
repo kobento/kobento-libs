@@ -228,6 +228,20 @@ public:
     // Register a named color variable and apply default system color if known
     void registerNamedColor(int id, const std::string& colorName);
 
+    // Named variables (NAMED_VARIABLE), by name: how a host reads and sets a document's value
+    // (the reference's getVariableId). A name declared again takes the later id.
+    void registerNamedVariable(int id, int type, const std::string& name) { mNamedVariables[name] = {id, type}; }
+    /** The id of the variable the document named so, or -1. */
+    int namedVariableId(const std::string& name) const {
+        auto it = mNamedVariables.find(name);
+        return it == mNamedVariables.end() ? -1 : it->second.first;
+    }
+    /** Its type (NAMED_VARIABLE's: 0 string, 1 float, 2 color, 3 image, 4 int, ...), or -1. */
+    int namedVariableType(const std::string& name) const {
+        auto it = mNamedVariables.find(name);
+        return it == mNamedVariables.end() ? -1 : it->second.second;
+    }
+
     // Look up a default Material Design system color by name.
     // Returns true and sets outColor if found, false otherwise.
     static bool getDefaultSystemColor(const std::string& name, int& outColor);
@@ -455,6 +469,7 @@ private:
     std::unordered_map<int, int64_t> mLongs;
     std::unordered_map<int, bool> mBooleans;
     std::unordered_map<int, int> mColors;
+    std::unordered_map<std::string, std::pair<int, int>> mNamedVariables;   // name -> (id, type)
     std::unordered_set<int> mColorOverrides;  // IDs overridden by system theme defaults
     std::unordered_set<int> mFloatOverrides;
     std::unordered_set<int> mFloatListOverrides;

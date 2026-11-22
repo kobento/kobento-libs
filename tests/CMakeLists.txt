@@ -19,6 +19,13 @@ target_link_libraries(click_action_test PRIVATE rcskia rccore skia_lib)
 add_test(NAME click_action
          COMMAND click_action_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
+# Host actions and named variables as a host sees them: a hostNamedAction whose name is written
+# in its click list arrives with that name; a host finds an exported float by name and sets it.
+add_executable(host_action_names_test host_action_names_test.cpp)
+target_link_libraries(host_action_names_test PRIVATE rcskia rccore skia_lib)
+add_test(NAME host_action_names
+         COMMAND host_action_names_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
 # Diagnostic (not a test): maps click points to the variables they change.
 add_executable(click_probe click_probe.cpp)
 target_link_libraries(click_probe PRIVATE rcskia rccore skia_lib)

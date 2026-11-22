@@ -142,6 +142,11 @@ void initDocument() {
     g.customRouter.rcdoc = &g.rcDocHost;
     g.context->setCustomHost(&g.customRouter);   // video + embedded-web + embedded-rc custom components
     g.context->mDebug = g.debug;
+    // The document's host actions: a viewer has no app around it, so it says what it was asked
+    // (the Navigator convention's "back" and "navigate" among them).
+    g.context->hostNamedAction = [](const std::string& name, int, const std::string& value) {
+        std::cerr << "host action " << name << (value.empty() ? "" : " " + value) << "\n";
+    };
 
     g.context->mWidth = static_cast<float>(g.width);
     g.context->mHeight = static_cast<float>(g.height);

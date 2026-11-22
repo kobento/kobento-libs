@@ -23,6 +23,10 @@ public:
         return {{"textId", "INT", std::to_string(textId)}, {"text", "UTF8", text}};
     }
     void apply(RemoteContext& context) override;
+    // In a click's action list (the reference writes a hostNamedAction's name there when the
+    // name is used once): loaded when the list runs, before the action that names it, as Java
+    // and TS do. Otherwise the action went out with an empty name.
+    void runAction(RemoteContext& context, float, float) override { apply(context); }
 
     static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
         auto op = std::make_unique<TextData>();
@@ -746,6 +750,7 @@ public:
     int opcode() const override { return 137; }
     std::vector<Field> fields() const override { return {}; }
     void apply(RemoteContext& context) override {
+        context.registerNamedVariable(varId, varType, varName);
         if (varType == 2) {  // Color type
             context.registerNamedColor(varId, varName);
         }

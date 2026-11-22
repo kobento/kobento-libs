@@ -40,6 +40,21 @@ void keyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int 
         case GLFW_KEY_R:
             loadCurrentFile();
             break;
+        case GLFW_KEY_BACKSPACE: {
+            // The system back, by the Navigator convention: the document's while its exported
+            // canGoBack is 1 (one more backCount, and it pops), otherwise the app's (a viewer has
+            // nothing to go back to).
+            if (!g.context) break;
+            const int can = g.context->namedVariableId("canGoBack");
+            const int count = g.context->namedVariableId("backCount");
+            if (can >= 0 && count >= 0 && g.context->getFloat(can) > 0.5f) {
+                g.context->overrideFloat(count, g.context->getFloat(count) + 1.0f);
+                g.needsRedraw = true;
+            } else {
+                std::cerr << "back: the app's (the document is at its start)\n";
+            }
+            break;
+        }
         case GLFW_KEY_D:
             g.debug = (g.debug + 1) % 3;
             g.needsRedraw = true;

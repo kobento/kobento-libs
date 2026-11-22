@@ -1,0 +1,62 @@
+{
+ "header": {
+  "apiLevel": 7,
+  "width": 200,
+  "height": 100,
+  "profiles": 513
+ },
+ "resources": {
+  "variables": {
+   "count": {
+    "value": 3,
+    "export": true
+   }
+  }
+ },
+ "root": {
+  "row": {
+   "modifiers": [
+    "fillMaxSize"
+   ],
+   "children": [
+    {
+     "box": {
+      "modifiers": [
+       {
+        "size": [
+         100,
+         100
+        ]
+       },
+       {
+        "onClick": {
+         "type": "hostNamedAction",
+         "name": "back"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "box": {
+      "modifiers": [
+       {
+        "size": [
+         100,
+         100
+        ]
+       },
+       {
+        "onClick": {
+         "type": "hostNamedAction",
+         "name": "navigate",
+         "value": "/x"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}
