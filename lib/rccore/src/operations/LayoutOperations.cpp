@@ -618,7 +618,8 @@ static void applyLayoutCompute(const LayoutComputeInfo& info, RemoteContext& ctx
 }
 
 // ── Text wrapping helper ──────────────────────────────────────────────
-struct TextLine { int start, end; };
+// w: the line's width as wrapText summed it (its words and the spaces between them).
+struct TextLine { int start, end; float w = 0.0f; };
 
 // Convert a UTF-8 byte offset into a UTF-16 code-unit index. wrapText works in bytes,
 // but drawTextRun takes UTF-16 char indices (Java string semantics); a multi-byte
@@ -680,7 +681,7 @@ static std::vector<TextLine> wrapText(PaintContext* pc, const std::string& text,
 
         if (lineWidth + spaceW + wordW > maxWidth + kWrapSlack && lineWidth > 0) {
             // Wrap: emit current line
-            lines.push_back({lineStart, lastWordEnd});
+            lines.push_back({lineStart, lastWordEnd, lineWidth});
             lineStart = wordStart;
             lineWidth = wordW;
         } else {
@@ -690,7 +691,7 @@ static std::vector<TextLine> wrapText(PaintContext* pc, const std::string& text,
 
         // Handle newline
         if (i < n && text[i] == '\n') {
-            lines.push_back({lineStart, i});
+            lines.push_back({lineStart, i, lineWidth});
             i++;
             lineStart = i;
             lineWidth = 0;
@@ -699,7 +700,7 @@ static std::vector<TextLine> wrapText(PaintContext* pc, const std::string& text,
     }
 
     if (lineStart < n || lines.empty()) {
-        lines.push_back({lineStart, n});
+        lines.push_back({lineStart, n, lineWidth});
     }
     return lines;
 }
@@ -987,7 +988,12 @@ static void measureText(Operation* op, PaintContext* pc, RemoteContext& ctx,
             std::string lineStr = text.substr(line.start, line.end - line.start);
             float lw = (pc ? pc->measureTextWidth(lineStr, fsize) : fsize * 0.6f * lineStr.size())
                        + lsPx * utf8Count(lineStr);
-            maxLineW = std::max(maxLineW, lw);
+            // At least the width wrapText gave the line: paint wraps the text again in the
+            // width measured here, by the same word sums, and a shaped line can measure
+            // narrower than its words one by one (Arabic: each word shaped alone, a
+            // different space), so the shaped width broke it into one line more than the
+            // height had room for, and the last words were cut.
+            maxLineW = std::max(maxLineW, std::max(lw, line.w + lsPx * utf8Count(lineStr)));
         }
         textW = std::min(maxLineW, contentMaxW > 0 ? contentMaxW : maxLineW);
     }
