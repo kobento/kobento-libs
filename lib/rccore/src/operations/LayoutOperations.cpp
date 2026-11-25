@@ -213,7 +213,76 @@ void LayoutText::updateVariables(RemoteContext& context) {
     oFontWeight = Utils::resolveFloat(fontWeight, context);
 }
 
+void TextStyleOp::applyStyle(const TextStyleOp& p) {
+#define RC_INHERIT(has, field) if (!has && p.has) { field = p.field; has = true; }
+    RC_INHERIT(hasColor, color)
+    RC_INHERIT(hasColorId, colorId)
+    RC_INHERIT(hasFontSize, fontSize)
+    RC_INHERIT(hasMinFontSize, minFontSize)
+    RC_INHERIT(hasMaxFontSize, maxFontSize)
+    RC_INHERIT(hasFontStyle, fontStyle)
+    RC_INHERIT(hasFontWeight, fontWeight)
+    RC_INHERIT(hasFontFamily, fontFamilyId)
+    RC_INHERIT(hasTextAlign, textAlign)
+    RC_INHERIT(hasOverflow, overflow)
+    RC_INHERIT(hasMaxLines, maxLines)
+    RC_INHERIT(hasLetterSpacing, letterSpacing)
+    RC_INHERIT(hasLineHeightAdd, lineHeightAdd)
+    RC_INHERIT(hasLineHeightMultiplier, lineHeightMultiplier)
+    RC_INHERIT(hasLineBreakStrategy, lineBreakStrategy)
+    RC_INHERIT(hasHyphenationFrequency, hyphenationFrequency)
+    RC_INHERIT(hasJustificationMode, justificationMode)
+    RC_INHERIT(hasUnderline, underline)
+    RC_INHERIT(hasStrikethrough, strikethrough)
+    RC_INHERIT(hasAutosize, autosize)
+#undef RC_INHERIT
+    if (fontAxis.empty() && !p.fontAxis.empty()) {
+        fontAxis = p.fontAxis;
+        fontAxisValues = p.fontAxisValues;
+    }
+}
+
+void TextStyleOp::apply(RemoteContext& context) {
+    if (parentId != -1) {
+        if (auto* parent = dynamic_cast<TextStyleOp*>(context.getObject(parentId))) applyStyle(*parent);
+    }
+    if (id != -1) context.putObject(id, this);
+}
+
+// Each value is taken only while the text still has its default, as Java's
+// TextStyle.PARAMETERS.isDefault checks (floats compare by value; a variable is a NaN, never
+// equal, so a text's variable size always wins).
+void CoreTextOp::applyStyle(const TextStyleOp& s) {
+    if (color == static_cast<int>(0xFF000000) && s.hasColor) color = s.color;
+    if (colorId == -1 && s.hasColorId) colorId = s.colorId;
+    if (fontSize == 36.0f && s.hasFontSize) fontSize = s.fontSize;
+    if (minFontSize == -1.0f && s.hasMinFontSize) minFontSize = s.minFontSize;
+    if (maxFontSize == -1.0f && s.hasMaxFontSize) maxFontSize = s.maxFontSize;
+    if (fontStyle == 0 && s.hasFontStyle) fontStyle = s.fontStyle;
+    if (fontWeight == 400.0f && s.hasFontWeight) fontWeight = s.fontWeight;
+    if (fontFamilyId == -1 && s.hasFontFamily) fontFamilyId = s.fontFamilyId;
+    if (textAlign == 1 && s.hasTextAlign) textAlign = s.textAlign;
+    if (overflow == 1 && s.hasOverflow) overflow = s.overflow;
+    if (maxLines == 0x7FFFFFFF && s.hasMaxLines) maxLines = s.maxLines;
+    if (letterSpacing == 0.0f && s.hasLetterSpacing) letterSpacing = s.letterSpacing;
+    if (lineHeightAdd == 0.0f && s.hasLineHeightAdd) lineHeightAdd = s.lineHeightAdd;
+    if (lineHeightMultiplier == 1.0f && s.hasLineHeightMultiplier) lineHeightMultiplier = s.lineHeightMultiplier;
+    if (!underline && s.hasUnderline) underline = s.underline;
+    if (!strikethrough && s.hasStrikethrough) strikethrough = s.strikethrough;
+    if (!autosize && s.hasAutosize) autosize = s.autosize;
+    // Line break strategy, hyphenation, justification and font axes are not read for a text
+    // here (CoreTextOp::read skips them), so the style's are not either.
+}
+
+void CoreTextOp::resolveStyle(RemoteContext& context) {
+    if (textStyleId == -1) return;
+    if (auto* style = dynamic_cast<TextStyleOp*>(context.getObject(textStyleId))) applyStyle(*style);
+}
+
 void CoreTextOp::registerListening(RemoteContext& context) {
+    // The style first (Java applies it only in updateVariables): a size or weight the style
+    // takes from a variable is then listened to like the text's own.
+    resolveStyle(context);
     Utils::registerFloatVar(fontSize, context, this);
     Utils::registerFloatVar(fontWeight, context, this);
     for (auto& child : mChildren) {
@@ -221,6 +290,7 @@ void CoreTextOp::registerListening(RemoteContext& context) {
     }
 }
 void CoreTextOp::updateVariables(RemoteContext& context) {
+    resolveStyle(context);
     oFontSize = Utils::resolveFloat(fontSize, context);
     oFontWeight = Utils::resolveFloat(fontWeight, context);
 }

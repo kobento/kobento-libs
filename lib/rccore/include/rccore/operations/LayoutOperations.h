@@ -292,6 +292,8 @@ public:
     }
 };
 
+class TextStyleOp;
+
 // ── CoreText (239) ─────────────────────────────────────────────────────
 class CoreTextOp : public Operation {
 public:
@@ -311,6 +313,8 @@ public:
     float letterSpacing = 0, lineHeightAdd = 0, lineHeightMultiplier = 1;
     bool underline = false, strikethrough = false;
     bool autosize = false; float minFontSize = -1, maxFontSize = -1;   // TextStyle P_AUTOSIZE / P_MIN/MAX_FONT_SIZE
+    // P_PARENT_ID (24) on a text: the TextStyle it takes its unset values from (applyStyle).
+    int textStyleId = -1;
 
     float oFontSize = 36, oFontWeight = 400;
     int getOpComponentId() const override { return componentId; }
@@ -324,6 +328,10 @@ public:
     bool isVariableSupport() const override { return true; }
     void registerListening(RemoteContext& context) override;
     void updateVariables(RemoteContext& context) override;
+    // Java CoreText.applyStyle: the named TextStyle gives every value the text left at its
+    // default; the text's own values win.
+    void applyStyle(const TextStyleOp& style);
+    void resolveStyle(RemoteContext& context);
 
     static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
         auto op = std::make_unique<CoreTextOp>();
@@ -372,7 +380,7 @@ public:
                         case 11: op->maxLines = val; break;
                         case 15: case 16: case 17: break; // break/hyphen/justify - skip
                         case 23: op->flags = val; break;
-                        case 24: break; // textStyleId - skip
+                        case 24: op->textStyleId = buf.remapId(val); break;
                         // FLOAT params (stored as int bits, decode via memcpy)
                         case 5: { float f; memcpy(&f, &val, sizeof(f)); op->fontSize = f; break; }
                         case 7: { float f; memcpy(&f, &val, sizeof(f)); op->fontWeight = f; break; }
@@ -1325,7 +1333,10 @@ public:
     std::string name() const override { return "TEXT_STYLE"; }
     int opcode() const override { return 242; }
     std::vector<Field> fields() const override { return {}; }
-    void apply(RemoteContext& context) override {}
+    // Java TextStyle.apply: inherit what this style leaves unset from its parent (resolved
+    // against its own parent when it was applied), then register it for the texts naming it.
+    void apply(RemoteContext& context) override;
+    void applyStyle(const TextStyleOp& style);
     static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
         auto op = std::make_unique<TextStyleOp>();
         int count = buf.readShort();
