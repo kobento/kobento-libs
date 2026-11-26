@@ -63,6 +63,9 @@ public:
     static constexpr int ROOT_CONTENT_DESCRIPTION = 103;
     static constexpr int MODIFIER_BORDER = 107;
     static constexpr int MODIFIER_CLIP_RECT = 108;
+    static constexpr int MODIFIER_CLIP_PATH = 109;            // experimental (a34763e67a6)
+    static constexpr int MODIFIER_PROPERTY_BUNDLE = 95;       // androidx experimental
+    static constexpr int PROPERTY_BUNDLE_LOOKUP = 96;         // androidx experimental
     static constexpr int PATH_DATA = 123;
     static constexpr int DRAW_PATH = 124;
     static constexpr int DRAW_TWEEN_PATH = 125;

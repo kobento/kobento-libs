@@ -5,10 +5,12 @@
 #include "rccore/RemapContext.h"
 #include <vector>
 #include <memory>
+#include <unordered_map>
 
 namespace rccore {
 
 class WireBuffer;
+class PropertyBundleModifierOp;
 
 class CoreDocument : public IdAllocator {
 public:
@@ -35,6 +37,11 @@ public:
     // Per-document because component ids only mean something inside one document; see
     // animation/LayoutAnimation.h.
     LayoutAnimStore& animStore() { return mAnimStore; }
+
+    /** The MODIFIER_PROPERTY_BUNDLE of a component (a content's id stands for its layout, as
+     *  PropertyBundleLookupOperation.resolveSource maps LayoutComponentContent and CanvasContent
+     *  to their parent), or null. */
+    const PropertyBundleModifierOp* propertyBundleOf(int componentId) const;
 
     // Two-pass execution
     // theme: -1=UNSPECIFIED (no filtering), -3=LIGHT, -2=DARK
@@ -105,6 +112,13 @@ public:
     static constexpr int ALIGNMENT_END = 0x40;
 
 private:
+    /** Component.inflate / LayoutComponent.inflate for property bundles: each component's bundle
+     *  by its id, each content's layout, and lookups naming no component (-1) bound to the one
+     *  they are in. */
+    void bindPropertyBundles(std::vector<std::unique_ptr<Operation>>& ops, int enclosing);
+    std::unordered_map<int, PropertyBundleModifierOp*> mPropertyBundles;
+    std::unordered_map<int, int> mContentOwner;
+
     void applyOperations(RemoteContext& context,
                          std::vector<std::unique_ptr<Operation>>& ops,
                          int theme = -3);

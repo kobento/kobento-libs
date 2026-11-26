@@ -306,7 +306,10 @@ static bool isModifierOp(const Operation* op) {
            // 243 MODIFIER_DIMENSION_CONSTRAINTS (requiredWidthIn/requiredHeightIn) and
            // 250 ACCESSIBILITY_SEMANTICS are modifiers too. Omitting them here meant
            // the switch below never saw them: 243's constraints were silently dropped.
-           oc == 243 || oc == 250;
+           oc == 243 || oc == 250 ||
+           // 109 MODIFIER_CLIP_PATH; 95 MODIFIER_PROPERTY_BUNDLE (read by lookups, through
+           // CoreDocument, and nothing to lay out or paint).
+           oc == 109 || oc == 95;
 }
 
 static bool isLayoutComponent(const Operation* op) {
@@ -482,6 +485,11 @@ static void inflateLayout(Operation* self, LayoutState& ls) {
                     ls.hasClipRect = true;
                     break;
                 }
+                case 109:  // ClipPathModifier: painted in modifier order
+                    ls.paintMods.push_back({child});
+                    break;
+                case 95:   // PropertyBundleModifier: indexed by CoreDocument
+                    break;
                 case 54: { // RoundedClipRectModifier
                     ls.paintMods.push_back({child});
                     auto* m = static_cast<ModifierRoundedClipRect*>(child);
@@ -3609,6 +3617,9 @@ static void paintLayoutComponent(Operation* op, RemoteContext& ctx, MeasurePass&
                 case 108:  // clip rect
                     pc->clipRect(0, 0, dw, dh);
                     break;
+                case 109:  // clip path: ClipPathModifierOperation.paint, ClipPath.INTERSECT (2)
+                    pc->clipPath(static_cast<ModifierClipPath*>(pm.op)->pathId, 2);
+                    break;
                 case 54: { // rounded clip rect
                     auto* rc = static_cast<ModifierRoundedClipRect*>(pm.op);
                     pc->roundedClipRect(dw, dh, rc->oTopStart * gDpScale, rc->oTopEnd * gDpScale,
@@ -3912,6 +3923,36 @@ static void animateLayoutTree(Operation* op, RemoteContext& ctx, MeasurePass& me
         if (sl->inTransition) sSawActiveAnim = true;   // keep the frames coming
         sSawActiveAnim = sSawActiveAnim || saw;
     }
+}
+
+// ── PropertyBundleLookup ─────────────────────────────────────────────
+// PropertyBundleLookupOperation: resolveSource finds the variable behind the property (once the
+// document is there: its components do not change after load), registerListening listens to it,
+// apply loads it (or the default) into valueId.
+
+void PropertyBundleLookupOp::resolve(RemoteContext& context) {
+    CoreDocument* doc = context.getDocument();
+    sourceVariable = -1;
+    if (doc) {
+        const PropertyBundleModifierOp* bundle = doc->propertyBundleOf(componentId);
+        if (bundle && bundle->has(propertyId)) sourceVariable = bundle->variableOf(propertyId);
+    }
+    resolved = doc != nullptr;
+}
+
+void PropertyBundleLookupOp::registerListening(RemoteContext& context) {
+    resolved = false;
+    resolve(context);
+    if (sourceVariable != -1) context.listensTo(sourceVariable, this);
+}
+
+void PropertyBundleLookupOp::updateVariables(RemoteContext& context) {
+    if (!resolved) resolve(context);
+}
+
+void PropertyBundleLookupOp::apply(RemoteContext& context) {
+    updateVariables(context);
+    context.loadInteger(valueId, sourceVariable != -1 ? context.getInteger(sourceVariable) : defaultValue);
 }
 
 // ── Run data operations for a layout tree ────────────────────────────

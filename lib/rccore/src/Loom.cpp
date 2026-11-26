@@ -31,7 +31,7 @@ constexpr int MAX_EXPANSION_DEPTH = 64;
 // reader reads, except ComponentValue (150), whose second (the value) it is. Components are
 // VariableProviders too, reporting their component id.
 const std::unordered_set<int>& variableProviders() {
-    static const std::unordered_set<int> s = {45, 64, 80, 81, 101, 102, 123, 134, 135, 136, 138, 142, 144,
+    static const std::unordered_set<int> s = {45, 64, 80, 81, 96, 101, 102, 123, 134, 135, 136, 138, 142, 144,
         145, 146, 147, 150, 153, 156, 157, 158, 159, 161, 175, 180, 186, 187, 193, 196, 197, 242};
     return s;
 }

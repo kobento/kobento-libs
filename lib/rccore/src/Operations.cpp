@@ -190,6 +190,9 @@ void Operations::init() {
                    ModifierDimensionConstraints::read);
     registerReader(MODIFIER_CLIP_RECT, "ClipRectModifierOperation", ModifierClipRect::read);
     registerReader(MODIFIER_ROUNDED_CLIP_RECT, "RoundedClipRectModifierOperation", ModifierRoundedClipRect::read);
+    registerReader(MODIFIER_CLIP_PATH, "ClipPathModifierOperation", ModifierClipPath::read);
+    registerReader(MODIFIER_PROPERTY_BUNDLE, "PropertyBundleModifierOperation", PropertyBundleModifierOp::read);
+    registerReader(PROPERTY_BUNDLE_LOOKUP, "PropertyBundleLookupOperation", PropertyBundleLookupOp::read);
     registerReader(MODIFIER_VISIBILITY, "MODIFIER_VISIBILITY", ModifierVisibility::read);
     registerReader(MODIFIER_ALIGN_BY, "MODIFIER_ALIGN_BY", ModifierAlignBy::read);
     registerReader(MODIFIER_WIDTH_IN, "MODIFIER_WIDTH_IN", ModifierWidthIn::read);

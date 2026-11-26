@@ -744,6 +744,97 @@ public:
     }
 };
 
+/** MODIFIER_CLIP_PATH (109, ClipPathModifierOperation, experimental): what follows (later
+ *  modifiers, the content) is clipped to a path, in the coordinates it is painted in (the content
+ *  box after the padding before it), not scaled by density. */
+class ModifierClipPath : public Operation {
+public:
+    int pathId = 0;
+    std::string name() const override { return "ClipPathModifierOperation"; }
+    int opcode() const override { return 109; }
+    std::vector<Field> fields() const override { return {{"pathId", "INT", std::to_string(pathId)}}; }
+    void apply(RemoteContext& context) override {}
+    static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
+        auto op = std::make_unique<ModifierClipPath>();
+        op->pathId = buf.readId();
+        ops.push_back(std::move(op));
+    }
+};
+
+/** MODIFIER_PROPERTY_BUNDLE (95, PropertyBundleModifierOperation, androidx experimental): integer
+ *  properties attached to the component, each a property id and the id of the integer variable
+ *  holding its value. CoreDocument indexes them by component (bindPropertyBundles). */
+class PropertyBundleModifierOp : public Operation {
+public:
+    static constexpr int MAX_ENTRIES = 256;   // Limits.MAX_PROPERTY_BUNDLE_ENTRIES
+    int bundleId = 0, parentBundleId = 0;
+    std::vector<std::pair<int, int>> properties;   // propertyId, variable id; in wire order
+    std::string name() const override { return "PropertyBundleModifierOperation"; }
+    int opcode() const override { return 95; }
+    std::vector<Field> fields() const override {
+        return {{"bundleId", "INT", std::to_string(bundleId)}, {"parentBundleId", "INT", std::to_string(parentBundleId)},
+                {"count", "INT", std::to_string(properties.size())}};
+    }
+    void apply(RemoteContext& context) override {}
+    /** The variable holding propertyId, or -1. */
+    int variableOf(int propertyId) const {
+        for (auto& p : properties) if (p.first == propertyId) return p.second;
+        return -1;
+    }
+    bool has(int propertyId) const {
+        for (auto& p : properties) if (p.first == propertyId) return true;
+        return false;
+    }
+    static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
+        int version = buf.readInt();
+        if (version != 0) throw std::runtime_error("Unsupported PropertyBundleModifierOperation version: " + std::to_string(version));
+        auto op = std::make_unique<PropertyBundleModifierOp>();
+        op->bundleId = buf.readInt();
+        op->parentBundleId = buf.readInt();
+        int count = buf.readInt();
+        if (count < 0 || count > MAX_ENTRIES) throw std::runtime_error("Invalid PropertyBundle entry count: " + std::to_string(count));
+        for (int i = 0; i < count; i++) {
+            int propertyId = buf.readInt();
+            op->properties.emplace_back(propertyId, buf.readId());
+        }
+        ops.push_back(std::move(op));
+    }
+};
+
+/** PROPERTY_BUNDLE_LOOKUP (96, PropertyBundleLookupOperation, androidx experimental): a
+ *  component's integer property into valueId, else defaultValue. componentId -1 (SELF) is the
+ *  enclosing component, bound at load; a content's id stands for its layout. Listens to the
+ *  property's variable. */
+class PropertyBundleLookupOp : public Operation {
+public:
+    static constexpr int SELF = -1;
+    int valueId = 0, componentId = SELF, propertyId = 0, defaultValue = 0;
+    int sourceVariable = -1;
+    bool resolved = false;
+    std::string name() const override { return "PropertyBundleLookupOperation"; }
+    int opcode() const override { return 96; }
+    std::vector<Field> fields() const override {
+        return {{"valueId", "INT", std::to_string(valueId)}, {"componentId", "INT", std::to_string(componentId)},
+                {"propertyId", "INT", std::to_string(propertyId)}, {"defaultValue", "INT", std::to_string(defaultValue)}};
+    }
+    bool isVariableSupport() const override { return true; }
+    void registerListening(RemoteContext& context) override;
+    void updateVariables(RemoteContext& context) override;
+    void apply(RemoteContext& context) override;
+    static void read(WireBuffer& buf, std::vector<std::unique_ptr<Operation>>& ops) {
+        int version = buf.readInt();
+        if (version != 0) throw std::runtime_error("Unsupported PropertyBundleLookupOperation version: " + std::to_string(version));
+        auto op = std::make_unique<PropertyBundleLookupOp>();
+        op->valueId = buf.declareId();
+        op->componentId = buf.readId();
+        op->propertyId = buf.readInt();
+        op->defaultValue = buf.readInt();
+        ops.push_back(std::move(op));
+    }
+private:
+    void resolve(RemoteContext& context);
+};
+
 class ModifierRoundedClipRect : public Operation {
 public:
     float topStart = 0, topEnd = 0, bottomStart = 0, bottomEnd = 0;
@@ -1367,7 +1458,8 @@ public:
                 case P_FONT_AXIS: {
                     int len = buf.readShort();
                     op->fontAxis.resize(len);
-                    for (int k = 0; k < len; k++) op->fontAxis[k] = buf.readInt();
+                    // Each axis is a text id (its tag): resolved inside a pattern (b7682af3f82).
+                    for (int k = 0; k < len; k++) op->fontAxis[k] = buf.remapId(buf.readInt());
                     break;
                 }
                 case P_FONT_AXIS_VALUES: {

@@ -51,6 +51,9 @@ bool CoreDocument::initFromBuffer(WireBuffer& buffer) {
 
     // Expand every template call (Loom), as LoomManager.expandAll does after nesting.
     expandLoom(mOperations, *this);
+    mPropertyBundles.clear();
+    mContentOwner.clear();
+    bindPropertyBundles(mOperations, -1);
 
     // Extract dimensions from header if present
     if (!mOperations.empty()) {
@@ -91,6 +94,43 @@ void CoreDocument::prunePatternDefinitions(
             prunePatternDefinitions(op->mChildren);
         }
     }
+}
+
+// ── Property bundles ──────────────────────────────────────────────────
+
+void CoreDocument::bindPropertyBundles(std::vector<std::unique_ptr<Operation>>& ops, int enclosing) {
+    for (auto& op : ops) {
+        int oc = op->opcode();
+        if (oc == Operations::PROPERTY_BUNDLE_LOOKUP) {
+            auto* lookup = static_cast<PropertyBundleLookupOp*>(op.get());
+            if (lookup->componentId == PropertyBundleLookupOp::SELF && enclosing != -1) lookup->componentId = enclosing;
+            continue;
+        }
+        // (LayoutComponentContent keeps its id without reporting it as a component's.)
+        int cid = oc == 201 ? static_cast<LayoutComponentContent*>(op.get())->componentId : op->getOpComponentId();
+        if (oc == 201 || oc == 207) {   // LayoutComponentContent, CanvasContent: their layout's
+            if (cid != -1 && enclosing != -1) mContentOwner[cid] = enclosing;
+            bindPropertyBundles(op->mChildren, enclosing);
+            continue;
+        }
+        if (cid != -1) {                // a component: its bundle (the last, as inflate keeps)
+            for (auto& child : op->mChildren) {
+                if (child->opcode() == Operations::MODIFIER_PROPERTY_BUNDLE) {
+                    mPropertyBundles[cid] = static_cast<PropertyBundleModifierOp*>(child.get());
+                }
+            }
+            bindPropertyBundles(op->mChildren, cid);
+            continue;
+        }
+        if (!op->mChildren.empty()) bindPropertyBundles(op->mChildren, enclosing);   // loops, conditionals
+    }
+}
+
+const PropertyBundleModifierOp* CoreDocument::propertyBundleOf(int componentId) const {
+    auto owner = mContentOwner.find(componentId);
+    if (owner != mContentOwner.end()) componentId = owner->second;
+    auto it = mPropertyBundles.find(componentId);
+    return it == mPropertyBundles.end() ? nullptr : it->second;
 }
 
 // ── Listener registration ─────────────────────────────────────────────

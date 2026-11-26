@@ -31,6 +31,11 @@ target_link_libraries(text_style_test PRIVATE rcskia rccore skia_lib)
 add_test(NAME text_style
          COMMAND text_style_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
+add_executable(property_bundle_test property_bundle_test.cpp)
+target_link_libraries(property_bundle_test PRIVATE rcskia rccore skia_lib)
+add_test(NAME property_bundle
+         COMMAND property_bundle_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
 # Diagnostic (not a test): maps click points to the variables they change.
 add_executable(click_probe click_probe.cpp)
 target_link_libraries(click_probe PRIVATE rcskia rccore skia_lib)
