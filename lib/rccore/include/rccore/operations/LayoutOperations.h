@@ -312,6 +312,9 @@ public:
     // StaticLayout's setLetterSpacing / setLineSpacing(add, multiplier) get on Android.
     float letterSpacing = 0, lineHeightAdd = 0, lineHeightMultiplier = 1;
     bool underline = false, strikethrough = false;
+    // Font variation axes: each a text id (its tag) and a value (a float or a variable).
+    std::vector<int> fontAxis;
+    std::vector<float> fontAxisValues;
     bool autosize = false; float minFontSize = -1, maxFontSize = -1;   // TextStyle P_AUTOSIZE / P_MIN/MAX_FONT_SIZE
     // P_PARENT_ID (24) on a text: the TextStyle it takes its unset values from (applyStyle).
     int textStyleId = -1;
@@ -350,16 +353,18 @@ public:
                 case 22:
                     op->autosize = buf.readBoolean();
                     break;
-                // Int array (fontAxis)
+                // Int array (fontAxis): text ids, resolved inside a pattern (b7682af3f82)
                 case 20: {
                     int count = buf.readShort();
-                    for (int j = 0; j < count; j++) buf.readInt();
+                    op->fontAxis.resize(count);
+                    for (int j = 0; j < count; j++) op->fontAxis[j] = buf.remapId(buf.readInt());
                     break;
                 }
-                // Float array (fontAxisValues)
+                // Float array (fontAxisValues): a value or a variable
                 case 21: {
                     int count = buf.readShort();
-                    for (int j = 0; j < count; j++) buf.readFloat();
+                    op->fontAxisValues.resize(count);
+                    for (int j = 0; j < count; j++) op->fontAxisValues[j] = buf.readFloat();
                     break;
                 }
                 default: {

@@ -270,8 +270,12 @@ void CoreTextOp::applyStyle(const TextStyleOp& s) {
     if (!underline && s.hasUnderline) underline = s.underline;
     if (!strikethrough && s.hasStrikethrough) strikethrough = s.strikethrough;
     if (!autosize && s.hasAutosize) autosize = s.autosize;
-    // Line break strategy, hyphenation, justification and font axes are not read for a text
-    // here (CoreTextOp::read skips them), so the style's are not either.
+    if (fontAxis.empty() && !s.fontAxis.empty()) {
+        fontAxis = s.fontAxis;
+        fontAxisValues = s.fontAxisValues;
+    }
+    // Line break strategy, hyphenation and justification are not read for a text here
+    // (CoreTextOp::read skips them), so the style's are not either.
 }
 
 void CoreTextOp::resolveStyle(RemoteContext& context) {
@@ -640,6 +644,21 @@ static float resolveVar(float v, const RemoteContext& ctx) {
     return v;
 }
 
+// CoreText's font variation axes on the paint (CoreText.paint / measure: PaintBundle.setTextAxis),
+// each value resolved when it is a variable. Nothing for a text without axes.
+static bool hasTextAxes(const Operation* op) {
+    return op->opcode() == 239 && !static_cast<const CoreTextOp*>(op)->fontAxis.empty();
+}
+static void applyTextAxes(const Operation* op, PaintContext* pc, const RemoteContext& ctx) {
+    if (!pc || !hasTextAxes(op)) return;
+    auto* ct = static_cast<const CoreTextOp*>(op);
+    std::vector<float> values(ct->fontAxis.size(), 0.0f);
+    for (size_t i = 0; i < values.size() && i < ct->fontAxisValues.size(); i++) values[i] = resolveVar(ct->fontAxisValues[i], ctx);
+    PaintBundle axes;
+    axes.addFontAxis(ct->fontAxis, values);
+    pc->applyPaint(axes);
+}
+
 // ── Apply LayoutCompute modifier (Java LayoutComputeOperation.applyToMeasure) ──
 static void applyLayoutCompute(const LayoutComputeInfo& info, RemoteContext& ctx,
                                 ComponentMeasure& childM, const ComponentMeasure& parentM) {
@@ -990,15 +1009,16 @@ static void measureText(Operation* op, PaintContext* pc, RemoteContext& ctx,
         else if (famName == "sans-serif" || famName == "sans") fType = 1;
         else if (!famName.empty()) fType = -1;   // a named family
     }
-    if (pc && (fType == -1 || mWeight != 400 || mStyle == 1 || fType > 0)) {
+    if (pc && (fType == -1 || mWeight != 400 || mStyle == 1 || fType > 0 || hasTextAxes(op))) {
         pc->savePaint();
         if (fType == -1) {
             pc->applyTypefaceByName(famName, mWeight > 0 ? mWeight : 400, mStyle == 1);
-        } else {
+        } else if (fType > 0 || mWeight != 400 || mStyle == 1) {
             PaintBundle tf;
             tf.addTypeface(mWeight > 0 ? mWeight : 400, mStyle == 1, fType != 0 ? fType : 1);
             pc->applyPaint(tf);
         }
+        applyTextAxes(op, pc, ctx);   // measured as painted: a wider axis takes more room
         styledMeasure = true;
     }
     struct MeasureGuard {
@@ -3356,6 +3376,7 @@ static void paintTextContent(Operation* op, RemoteContext& ctx, PaintContext* pc
         if (fFamily == -1) {
             pc->applyTypefaceByName(fFamName, fWeight > 0 ? fWeight : 400, fStyle == 1);
         }
+        applyTextAxes(op, pc, ctx);
 
         float contentW = m.w - ls.paddingLeft - ls.paddingRight;
         float contentH = m.h - ls.paddingTop - ls.paddingBottom;

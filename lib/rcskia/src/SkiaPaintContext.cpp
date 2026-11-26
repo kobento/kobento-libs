@@ -9,6 +9,7 @@
 #include "include/core/SkVertices.h"
 #include "rccore/operations/Mesh2D.h"
 #include "rccore/d3/Paint3DContext.h"
+#include "include/core/SkFontArguments.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontMetrics.h"
 #include "include/core/SkColorFilter.h"
@@ -862,6 +863,7 @@ void SkiaPaintContext::applyPaint(const PaintBundle& bundle) {
 void SkiaPaintContext::savePaint() {
     mPaintStack.push(mPaint);
     mFontStack.push(mFont);
+    mVariationStack.push({mBaseTypeface, mFontAxes});
 }
 
 void SkiaPaintContext::restorePaint() {
@@ -872,6 +874,11 @@ void SkiaPaintContext::restorePaint() {
     if (!mFontStack.empty()) {
         mFont = mFontStack.top();
         mFontStack.pop();
+    }
+    if (!mVariationStack.empty()) {
+        mBaseTypeface = mVariationStack.top().first;
+        mFontAxes = mVariationStack.top().second;
+        mVariationStack.pop();
     }
 }
 
@@ -922,7 +929,35 @@ void SkiaPaintContext::applyTypefaceByName(const std::string& family, int weight
             tf = sk_sp<SkTypeface>(mFontMgr->matchFamilyStyle(kFallbackSans[k], style));
         mTypefaceCache[key] = tf;
     }
-    if (tf) mFont.setTypeface(tf);
+    if (tf) {
+        mFont.setTypeface(tf);
+        mBaseTypeface = tf;
+        applyFontVariations();
+    }
+}
+
+// The font's typeface with the variation axes, as Paint.setFontVariationSettings: a clone of the
+// base typeface at those coordinates (cached), the base itself when there are none. An axis the
+// font does not have is ignored by Skia, as Android ignores it.
+void SkiaPaintContext::applyFontVariations() {
+    if (!mBaseTypeface) mBaseTypeface = mFont.refTypeface();
+    if (!mBaseTypeface) return;
+    if (mFontAxes.empty()) { mFont.setTypeface(mBaseTypeface); return; }
+    std::string key = std::to_string(mBaseTypeface->uniqueID());
+    for (const auto& a : mFontAxes) key += ":" + std::to_string(a.tag) + "=" + std::to_string(a.value);
+    auto it = mVariationCache.find(key);
+    sk_sp<SkTypeface> tf;
+    if (it != mVariationCache.end()) {
+        tf = it->second;
+    } else {
+        std::vector<SkFontArguments::VariationPosition::Coordinate> coords;
+        for (const auto& a : mFontAxes) coords.push_back({a.tag, a.value});
+        SkFontArguments args;
+        args.setVariationDesignPosition({coords.data(), static_cast<int>(coords.size())});
+        tf = mBaseTypeface->makeClone(args);
+        mVariationCache[key] = tf;
+    }
+    mFont.setTypeface(tf ? tf : mBaseTypeface);
 }
 
 void SkiaPaintContext::saveLayerWithBlur(float sigmaX, float sigmaY,
@@ -1184,6 +1219,10 @@ void SkiaPaintContext::reset() {
     mFont.setSize(14);
     while (!mPaintStack.empty()) mPaintStack.pop();
     while (!mFontStack.empty()) mFontStack.pop();
+    while (!mVariationStack.empty()) mVariationStack.pop();
+    if (!mFontAxes.empty() && mBaseTypeface) mFont.setTypeface(mBaseTypeface);
+    mFontAxes.clear();
+    mBaseTypeface = nullptr;
     // NOTE: do NOT clear mShapeCache / mWidthCache here — reset() runs at the START of
     // every frame (CoreDocument::paint), so clearing them would defeat the whole point and
     // add per-frame alloc/clear churn (the actual cause of transition stutter). They are
@@ -1376,6 +1415,11 @@ void SkiaPaintContext::applyPaintBundle(const PaintBundle& bundle) {
     // the same frame had set. The reference's applyPaint is a bare applyPaintChange with
     // no reset; replacePaint is the variant that resets first.
 
+    bool variationsChanged = false;   // FONT_AXIS, or a typeface the axes apply to
+    struct ApplyVariations {
+        SkiaPaintContext* self; bool& on;
+        ~ApplyVariations() { if (on) self->applyFontVariations(); }
+    } applyVariations{this, variationsChanged};
     while (i < len) {
         int32_t cmd = arr[i++];
         int tag = cmd & 0xFFFF;
@@ -1605,7 +1649,7 @@ void SkiaPaintContext::applyPaintBundle(const PaintBundle& bundle) {
                     }
                     mTypefaceCache[key] = tf;  // cache even nullptr to avoid retrying
                 }
-                if (tf) mFont.setTypeface(tf);
+                if (tf) { mFont.setTypeface(tf); mBaseTypeface = tf; variationsChanged = true; }
                 break;
             }
             case PaintBundle::FALLBACK_TYPEFACE: {
@@ -1717,11 +1761,16 @@ void SkiaPaintContext::applyPaintBundle(const PaintBundle& bundle) {
                 break;
             }
             case PaintBundle::FONT_AXIS: {
+                // Each axis: its tag, a text ("wght", "wdth", "slnt", ...), and its value.
                 int count = upper;
-                for (int j = 0; j < count; j++) {
-                    i++; // tag text id
-                    i++; // value float
+                mFontAxes.clear();
+                for (int j = 0; j < count && i + 1 < len; j++) {
+                    std::string name = mContext.getText(arr[i++]);
+                    float value = PaintBundle::intBitsToFloat(arr[i++]);
+                    name.resize(4, ' ');
+                    mFontAxes.push_back({SkSetFourByteTag(name[0], name[1], name[2], name[3]), value});
                 }
+                variationsChanged = true;
                 break;
             }
             case PaintBundle::TEXTURE: {

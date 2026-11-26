@@ -222,6 +222,16 @@ private:
     std::stack<SkPaint> mPaintStack;
     std::stack<SkFont> mFontStack;
 
+    // Font variation axes (PaintBundle FONT_AXIS: Paint.setFontVariationSettings on Android).
+    // They apply to the typeface the paint has, mBaseTypeface, as a clone; a typeface chosen
+    // later keeps them. Saved and restored with the paint.
+    struct FontAxis { uint32_t tag; float value; };
+    std::vector<FontAxis> mFontAxes;
+    sk_sp<SkTypeface> mBaseTypeface;
+    std::stack<std::pair<sk_sp<SkTypeface>, std::vector<FontAxis>>> mVariationStack;
+    std::unordered_map<std::string, sk_sp<SkTypeface>> mVariationCache;
+    void applyFontVariations();
+
     // Cached font manager + typeface lookups. Reused across all draw calls
     // so that paint changes carrying a TYPEFACE tag don't trigger a fresh
     // CoreText font catalog scan every span. Key encodes family + weight +

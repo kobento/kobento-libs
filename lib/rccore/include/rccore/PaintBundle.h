@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 #include <string>
@@ -134,6 +135,15 @@ public:
         int v = (weight & 0x3FF) | (italic ? (1 << 10) : 0);
         mArray.push_back(TYPEFACE | (v << 16));
         mArray.push_back(fontType);
+    }
+    // FONT_AXIS: the count in the upper 16 bits, then per axis its tag (a text id) and its value.
+    void addFontAxis(const std::vector<int>& tagIds, const std::vector<float>& values) {
+        size_t n = std::min(tagIds.size(), values.size());
+        mArray.push_back(FONT_AXIS | (static_cast<int>(n) << 16));
+        for (size_t i = 0; i < n; i++) {
+            mArray.push_back(tagIds[i]);
+            mArray.push_back(floatToIntBits(values[i]));
+        }
     }
     void reset() { mArray.clear(); mOutArray.clear(); }
 

@@ -31,6 +31,11 @@ target_link_libraries(text_style_test PRIVATE rcskia rccore skia_lib)
 add_test(NAME text_style
          COMMAND text_style_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
+add_executable(font_axis_test font_axis_test.cpp)
+target_link_libraries(font_axis_test PRIVATE rcskia rccore skia_lib)
+add_test(NAME font_axis
+         COMMAND font_axis_test "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
 add_executable(compression_test compression_test.cpp)
 target_link_libraries(compression_test PRIVATE rccore)
 add_test(NAME compression
