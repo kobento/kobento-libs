@@ -93,9 +93,16 @@ void DefineMesh3D::apply(RemoteContext& context) {
     if (Paint3D* p = p3d(context)) p->defineMesh3D(id, indices, verts, normals, uv);
 }
 
+// Advanced3D.check: bit 30 of a mesh id, a draw mode or a texture id marks the advanced form of a
+// later 3D format version, which readers of this one refuse.
+static void checkAdvanced(int field, const char* op) {
+    if (field & (1 << 30)) throw std::runtime_error(std::string(op) + ": advanced form (bit 30) is not supported by this player");
+}
+
 void DefineMesh3D::read(WireBuffer& b, std::vector<std::unique_ptr<Operation>>& ops) {
     auto op = std::make_unique<DefineMesh3D>();
     op->id = b.readInt();
+    checkAdvanced(op->id, "DefineMesh3D");
     int idxLen = b.readInt();
     if (idxLen < 0 || idxLen > MAX_INDICES || (idxLen % 3) != 0)
         throw std::runtime_error("DefineMesh3D: bad indices length");
@@ -177,6 +184,7 @@ void DrawMesh3D::read(WireBuffer& b, std::vector<std::unique_ptr<Operation>>& op
     auto op = std::make_unique<DrawMesh3D>();
     op->meshId = b.readInt();
     op->mode = b.readInt();
+    checkAdvanced(op->mode, "DrawMesh3D");
     ops.push_back(std::move(op));
 }
 
@@ -239,6 +247,7 @@ void SetTexture3D::apply(RemoteContext& c) {
 void SetTexture3D::read(WireBuffer& b, std::vector<std::unique_ptr<Operation>>& ops) {
     auto op = std::make_unique<SetTexture3D>();
     op->bitmapId = b.readInt();
+    checkAdvanced(op->bitmapId, "SetTexture3D");
     ops.push_back(std::move(op));
 }
 

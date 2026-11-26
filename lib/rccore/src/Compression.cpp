@@ -217,7 +217,11 @@ void decompressDocument(const uint8_t* data, size_t size, std::vector<uint8_t>& 
     HeaderInfo h = headerInfo(data, size);
     if (!h.modern || !h.hasCompression || h.compression == COMPRESSION_NONE) { out.assign(data, data + size); return; }
     if (h.compression != COMPRESSION_DEFLATE) throw CompressionError("Unsupported document compression " + std::to_string(h.compression));
-    std::vector<uint8_t> body = inflateZlib(data + h.end, size - h.end);
+    // Header.COMPRESSED_STREAM_MARKER (0x77) may start the data, before the zlib stream: a
+    // reserved opcode, so a player without compression stops on it. Streams written before the
+    // marker existed start right after the header.
+    size_t start = h.end < size && data[h.end] == 0x77 ? h.end + 1 : h.end;
+    std::vector<uint8_t> body = inflateZlib(data + start, size - start);
     out.clear();
     out.reserve(h.end + body.size());
     out.insert(out.end(), data, data + PROPERTY_COUNT_OFFSET);
